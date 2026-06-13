@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+env/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+
+# 환경 변수
+.env
+.env.local
+.env.*.local
+
+# Node
+node_modules/
+frontend/dist/
+frontend/.vite/
+
+# 업로드/임시 파일
+uploads/
+temp/
+tmp/
+*.mp4
+*.mov
+*.mkv
+*.avi
+*.mp3
+*.wav
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/

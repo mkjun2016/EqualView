@@ -1,0 +1,73 @@
+.layout {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 60px 20px 80px;
+}
+
+.header {
+  text-align: center;
+  margin-bottom: 40px;
+}
+
+.logo {
+  font-size: 32px;
+  font-weight: 800;
+  background: linear-gradient(135deg, #6c63ff, #a78bfa);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  letter-spacing: -0.5px;
+}
+
+.tagline {
+  margin-top: 6px;
+  font-size: 14px;
+  color: var(--text-muted);
+}
+
+.card {
+  width: 100%;
+  max-width: 560px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 36px 32px;
+}
+
+.errorBox {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 24px 0;
+  text-align: center;
+}
+
+.errorTitle {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--error);
+}
+
+.errorMsg {
+  font-size: 14px;
+  color: var(--text-muted);
+}
+
+.retryBtn {
+  margin-top: 8px;
+  padding: 10px 24px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: 14px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.retryBtn:hover {
+  background: var(--border);
+}
