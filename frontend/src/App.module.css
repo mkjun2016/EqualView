@@ -1,73 +1,309 @@
-.layout {
-  min-height: 100vh;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding: 60px 20px 80px;
+* {
+  box-sizing: border-box;
 }
 
-.header {
-  text-align: center;
-  margin-bottom: 40px;
-}
-
-.logo {
-  font-size: 32px;
-  font-weight: 800;
-  background: linear-gradient(135deg, #6c63ff, #a78bfa);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-  letter-spacing: -0.5px;
-}
-
-.tagline {
-  margin-top: 6px;
-  font-size: 14px;
-  color: var(--text-muted);
-}
-
-.card {
+html,
+body,
+#root {
+  margin: 0;
   width: 100%;
-  max-width: 560px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 20px;
-  padding: 36px 32px;
+  height: 100%;
+  overflow: hidden;
 }
 
-.errorBox {
+body {
+  color: white;
+  font-family: Inter, Arial, sans-serif;
+  background:
+    radial-gradient(circle at top, rgba(130, 140, 195, 0.3), transparent 42%),
+    linear-gradient(180deg, #222631 0%, #191c24 48%, #13161c 100%);
+}
+
+.app {
+  min-height: 100dvh;
+}
+
+/* Upload screen */
+
+.upload-page {
+  min-height: 100dvh;
+  width: 100%;
+
   display: flex;
-  flex-direction: column;
   align-items: center;
-  gap: 12px;
-  padding: 24px 0;
+  justify-content: center;
+
+  padding: 32px;
   text-align: center;
 }
 
-.errorTitle {
+.upload-card {
+  width: min(92vw, 760px);
+  min-height: 390px;
+
+  padding: 82px 72px 64px;
+
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+
+  background:
+    linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.07),
+      rgba(255, 255, 255, 0.035)
+    );
+
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 34px;
+
+  box-shadow:
+    0 34px 90px rgba(0, 0, 0, 0.36),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+
+  backdrop-filter: blur(16px);
+}
+
+.upload-card h1 {
+  margin: 0;
+
+  font-size: 76px;
+  font-weight: 720;
+  letter-spacing: -3px;
+}
+
+.upload-card p {
+  margin: 18px 0 0;
+
+  color: rgba(255, 255, 255, 0.68);
   font-size: 18px;
-  font-weight: 700;
-  color: var(--error);
+  line-height: 1.6;
 }
 
-.errorMsg {
-  font-size: 14px;
-  color: var(--text-muted);
-}
+.upload-box {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 
-.retryBtn {
-  margin-top: 8px;
-  padding: 10px 24px;
-  border-radius: 8px;
-  border: 1px solid var(--border);
-  background: var(--surface-2);
-  color: var(--text);
-  font-size: 14px;
+  margin-top: 46px;
+  padding: 18px 38px;
+
+  background: rgba(255, 255, 255, 0.92);
+  color: #111318;
+
+  border-radius: 999px;
   cursor: pointer;
-  transition: background 0.2s;
+
+  font-size: 18px;
+  font-weight: 750;
+  letter-spacing: -0.2px;
+
+  transition:
+    transform 0.18s ease,
+    background-color 0.18s ease,
+    box-shadow 0.18s ease;
 }
 
-.retryBtn:hover {
-  background: var(--border);
+.upload-box:hover {
+  background: #ffffff;
+  transform: translateY(-2px);
+  box-shadow: 0 18px 36px rgba(255, 255, 255, 0.1);
+}
+
+.upload-box:active {
+  transform: translateY(0);
+}
+
+/* Player screen */
+
+.player-page {
+  width: 100%;
+  height: 100vh;
+
+  display: grid;
+  grid-template-rows: 42px minmax(0, 1fr) 125px;
+  row-gap: 14px;
+
+  padding: 14px 1vw 16px;
+
+  text-align: center;
+  overflow: hidden;
+}
+
+.player-header {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+}
+
+.brand-button {
+  margin: 0;
+  padding: 0;
+
+  background: transparent;
+  border: none;
+
+  color: rgba(255, 255, 255, 0.9);
+
+  font-size: 24px;
+  font-weight: 750;
+  letter-spacing: -0.8px;
+
+  cursor: pointer;
+
+  transition:
+    color 0.16s ease,
+    opacity 0.16s ease,
+    transform 0.16s ease;
+}
+
+.brand-button:hover {
+  color: white;
+  transform: translateY(-1px);
+}
+
+.brand-button:active {
+  transform: translateY(0);
+  opacity: 0.75;
+}
+
+.video-section {
+  min-height: 0;
+  width: 100%;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  overflow: hidden;
+}
+
+.video-player {
+  display: block;
+
+  max-width: min(92vw, 1480px);
+  max-height: 100%;
+
+  width: auto;
+  height: auto;
+
+  background-color: black;
+  border-radius: 18px;
+
+  object-fit: contain;
+
+  border: 1px solid rgba(255, 255, 255, 0.07);
+
+  box-shadow:
+    0 34px 100px rgba(0, 0, 0, 0.52),
+    0 0 0 1px rgba(255, 255, 255, 0.02);
+}
+
+.control-area {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+
+  gap: 7px;
+
+  transform: none;
+}
+
+.record-button {
+  width: 70px;
+  height: 70px;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  flex-shrink: 0;
+
+  border-radius: 50%;
+  border: none;
+
+  background: transparent;
+  padding: 0;
+
+  overflow: hidden;
+  cursor: pointer;
+
+  box-shadow:
+    0 18px 44px rgba(0, 0, 0, 0.42),
+    0 0 0 1px rgba(255, 255, 255, 0.12);
+
+  transition:
+    transform 0.16s ease,
+    opacity 0.16s ease,
+    box-shadow 0.16s ease;
+}
+
+.record-button:hover {
+  transform: translateY(-1px);
+  box-shadow:
+    0 22px 54px rgba(0, 0, 0, 0.48),
+    0 0 0 1px rgba(255, 255, 255, 0.18);
+}
+
+.record-button:active {
+  transform: scale(0.96);
+}
+
+.record-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+  transform: none;
+}
+
+.record-button.listening {
+  animation: softPulse 1.2s infinite;
+}
+
+.record-icon {
+  width: 100%;
+  height: 100%;
+
+  display: block;
+  object-fit: cover;
+}
+
+.hint {
+  margin: 6px 0 0;
+
+  color: rgba(255, 255, 255, 0.62);
+  font-size: 16px;
+  font-weight: 500;
+}
+
+.status {
+  min-height: 22px;
+  margin: 0;
+
+  color: rgba(255, 255, 255, 0.78);
+  font-size: 16px;
+  font-weight: 500;
+}
+
+/* Animation */
+
+@keyframes softPulse {
+  0% {
+    box-shadow:
+      0 14px 38px rgba(0, 0, 0, 0.38),
+      0 0 0 0 rgba(255, 255, 255, 0.3);
+  }
+
+  70% {
+    box-shadow:
+      0 14px 38px rgba(0, 0, 0, 0.38),
+      0 0 0 16px rgba(255, 255, 255, 0);
+  }
+
+  100% {
+    box-shadow:
+      0 14px 38px rgba(0, 0, 0, 0.38),
+      0 0 0 0 rgba(255, 255, 255, 0);
+  }
 }
