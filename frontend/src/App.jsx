@@ -1,106 +1,216 @@
-import { useState, useEffect, useRef } from 'react'
-import UploadSection from './components/UploadSection'
-import PipelineProgress from './components/PipelineProgress'
-import ResultSection from './components/ResultSection'
-import { uploadVideo, getJobStatus } from './api/equalview'
-import styles from './App.module.css'
+import { useEffect, useRef, useState } from "react";
+import "./App.css";
 
-const POLL_INTERVAL = 2000
+import WaitingIcon from "./assets/waitingForVoice.jpg";
+import recordingIcon from "./assets/recording.png";
 
-export default function App() {
-  const [phase, setPhase] = useState('idle')        // idle | uploading | processing | done | error
-  const [uploadProgress, setUploadProgress] = useState(0)
-  const [currentStep, setCurrentStep] = useState(null)
-  const [jobId, setJobId] = useState(null)
-  const [filename, setFilename] = useState('')
-  const [errorMsg, setErrorMsg] = useState('')
-  const pollRef = useRef(null)
+function App() {
+  const [videoFile, setVideoFile] = useState(null);
+  const [videoURL, setVideoURL] = useState("");
+  const [isListening, setIsListening] = useState(false);
+  const [status, setStatus] = useState("");
 
-  useEffect(() => {
-    return () => clearInterval(pollRef.current)
-  }, [])
+  const videoRef = useRef(null);
+  const recognitionRef = useRef(null);
 
-  async function handleUpload(file) {
-    setFilename(file.name)
-    setPhase('uploading')
-    setUploadProgress(0)
+  function handleVideoUpload(event) {
+    const file = event.target.files[0];
 
-    try {
-      const { job_id } = await uploadVideo(file, setUploadProgress)
-      setJobId(job_id)
-      setPhase('processing')
-      setCurrentStep('whisper')
-      startPolling(job_id)
-    } catch (e) {
-      setErrorMsg(e.message)
-      setPhase('error')
+    if (!file) return;
+
+    const url = URL.createObjectURL(file);
+
+    setVideoFile(file);
+    setVideoURL(url);
+    setStatus("");
+  }
+
+  function startListening() {
+    if (!videoFile) {
+      setStatus("Please upload a video first.");
+      return;
+    }
+
+    const SpeechRecognition =
+      window.SpeechRecognition || window.webkitSpeechRecognition;
+
+    if (!SpeechRecognition) {
+      setStatus("Speech recognition is not supported in this browser.");
+      return;
+    }
+
+    const recognition = new SpeechRecognition();
+
+    recognition.lang = "en-US";
+    recognition.interimResults = false;
+    recognition.continuous = true;
+
+    recognition.onstart = () => {
+      setIsListening(true);
+      setStatus("Listening...");
+    };
+
+    recognition.onresult = (event) => {
+      const lastResultIndex = event.results.length - 1;
+      const userCommand = event.results[lastResultIndex][0].transcript;
+
+      handleUserCommand(userCommand);
+    };
+
+    recognition.onerror = (event) => {
+      setIsListening(false);
+      recognitionRef.current = null;
+
+      if (event.error === "not-allowed") {
+        setStatus("Microphone permission is blocked.");
+        return;
+      }
+
+      if (event.error === "no-speech") {
+        setStatus("No speech detected.");
+        return;
+      }
+
+      setStatus(`Speech recognition error: ${event.error}`);
+    };
+
+    recognition.onend = () => {
+      setIsListening(false);
+      recognitionRef.current = null;
+    };
+
+    recognitionRef.current = recognition;
+    recognition.start();
+  }
+
+  function stopListening() {
+    if (recognitionRef.current) {
+      recognitionRef.current.stop();
+      recognitionRef.current = null;
+    }
+
+    setIsListening(false);
+    setStatus("");
+  }
+
+  function toggleListening() {
+    if (isListening) {
+      stopListening();
+    } else {
+      startListening();
     }
   }
 
-  function startPolling(id) {
-    pollRef.current = setInterval(async () => {
-      try {
-        const data = await getJobStatus(id)
-        setCurrentStep(data.current_step)
+  function handleUserCommand(command) {
+    const lowerCommand = command.toLowerCase();
 
-        if (data.status === 'done') {
-          clearInterval(pollRef.current)
-          setPhase('done')
-        } else if (data.status === 'error') {
-          clearInterval(pollRef.current)
-          setErrorMsg(data.error ?? '처리 중 오류가 발생했습니다.')
-          setPhase('error')
-        }
-      } catch (e) {
-        clearInterval(pollRef.current)
-        setErrorMsg(e.message)
-        setPhase('error')
+    if (lowerCommand.includes("explain")) {
+      if (videoRef.current) {
+        videoRef.current.pause();
       }
-    }, POLL_INTERVAL)
+
+      setStatus("Explain command detected.");
+      return;
+    }
+
+    setStatus(`Heard: ${command}`);
   }
 
-  function reset() {
-    clearInterval(pollRef.current)
-    setPhase('idle')
-    setUploadProgress(0)
-    setCurrentStep(null)
-    setJobId(null)
-    setFilename('')
-    setErrorMsg('')
+  function goHome() {
+    stopListening();
+
+    if (videoURL) {
+      URL.revokeObjectURL(videoURL);
+    }
+
+    setVideoFile(null);
+    setVideoURL("");
+    setStatus("");
   }
+
+  useEffect(() => {
+    function handleKeyDown(event) {
+      if (event.repeat) return;
+
+      if (event.key.toLowerCase() === "q") {
+        event.preventDefault();
+        toggleListening();
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isListening, videoFile]);
+
+  useEffect(() => {
+    return () => {
+      if (videoURL) {
+        URL.revokeObjectURL(videoURL);
+      }
+    };
+  }, [videoURL]);
 
   return (
-    <div className={styles.layout}>
-      <header className={styles.header}>
-        <h1 className={styles.logo}>EqualView</h1>
-        <p className={styles.tagline}>AI 화면해설 자동생성 서비스</p>
-      </header>
+    <div className="app">
+      {!videoFile ? (
+        <main className="upload-page">
+            <section className="upload-card">
+                <h1>EqualView</h1>
+                <p>Upload a video from your folder.</p>
 
-      <main className={styles.card}>
-        {phase === 'idle' && (
-          <UploadSection onUpload={handleUpload} />
-        )}
+                <label className="upload-box">
+                Choose Video
+                <input
+                    type="file"
+                    accept="video/*"
+                    onChange={handleVideoUpload}
+                    hidden
+                />
+                </label>
 
-        {(phase === 'uploading' || phase === 'processing') && (
-          <PipelineProgress
-            status={phase}
-            uploadProgress={uploadProgress}
-            currentStep={currentStep}
-          />
-        )}
+                <p className="status">{status}</p>
+            </section>
+        </main>
+      ) : (
+        <main className="player-page">
+          <header className="player-header">
+            <button className="brand-button" onClick={goHome}>
+              EqualView
+            </button>
+          </header>
 
-        {phase === 'done' && (
-          <ResultSection jobId={jobId} filename={filename} onReset={reset} />
-        )}
+          <section className="video-section">
+            <video
+              ref={videoRef}
+              className="video-player"
+              src={videoURL}
+              controls
+            />
+          </section>
 
-        {phase === 'error' && (
-          <div className={styles.errorBox}>
-            <p className={styles.errorTitle}>오류가 발생했습니다</p>
-            <p className={styles.errorMsg}>{errorMsg}</p>
-            <button className={styles.retryBtn} onClick={reset}>처음으로</button>
-          </div>
-        )}
-      </main>
+          <section className="control-area">
+            <button
+              className={`record-button ${isListening ? "listening" : ""}`}
+              onClick={toggleListening}
+              aria-label={isListening ? "Stop listening" : "Start listening"}
+            >
+              <img
+                src={isListening ? recordingIcon: WaitingIcon}
+                alt=""
+                className="record-icon"
+              />
+            </button>
+
+            <p className="hint">Press Q or click the button</p>
+            <p className="status">{status}</p>
+          </section>
+        </main>
+      )}
     </div>
-  )
+  );
 }
+
+export default App;
