@@ -1,216 +1,326 @@
 import { useEffect, useRef, useState } from "react";
 import "./App.css";
 
-import WaitingIcon from "./assets/waitingForVoice.jpg";
-import recordingIcon from "./assets/recording.png";
+import WaitingIcon from "./icons/waitingForVoice.jpg";
+import recordingIcon from "./icons/recording.png";
 
 function App() {
-  const [videoFile, setVideoFile] = useState(null);
-  const [videoURL, setVideoURL] = useState("");
-  const [isListening, setIsListening] = useState(false);
-  const [status, setStatus] = useState("");
+	const [videoFile, setVideoFile] = useState(null);
+	const [videoURL, setVideoURL] = useState("");
+	const [isListening, setIsListening] = useState(false);
+	const [status, setStatus] = useState("");
 
-  const videoRef = useRef(null);
-  const recognitionRef = useRef(null);
+	const videoRef = useRef(null);
+	const mediaRecorderRef = useRef(null);
+	const audioStreamRef = useRef(null);
+	const audioChunksRef = useRef([]);
 
-  function handleVideoUpload(event) {
-    const file = event.target.files[0];
+	function handleVideoUpload(event) {
+		const file = event.target.files[0];
 
-    if (!file) return;
+		if (!file) return;
 
-    const url = URL.createObjectURL(file);
+		const url = URL.createObjectURL(file);
 
-    setVideoFile(file);
-    setVideoURL(url);
-    setStatus("");
-  }
+		setVideoFile(file);
+		setVideoURL(url);
+		setStatus("");
+	}
 
-  function startListening() {
-    if (!videoFile) {
-      setStatus("Please upload a video first.");
-      return;
-    }
+	function speak(text) {
+		if (!window.speechSynthesis) {
+			return;
+		}
 
-    const SpeechRecognition =
-      window.SpeechRecognition || window.webkitSpeechRecognition;
+		window.speechSynthesis.cancel();
 
-    if (!SpeechRecognition) {
-      setStatus("Speech recognition is not supported in this browser.");
-      return;
-    }
+		const utterance = new SpeechSynthesisUtterance(text);
+		utterance.lang = "en-US";
+		utterance.rate = 1;
+		utterance.pitch = 1;
 
-    const recognition = new SpeechRecognition();
+		window.speechSynthesis.speak(utterance);
+	}
 
-    recognition.lang = "en-US";
-    recognition.interimResults = false;
-    recognition.continuous = true;
+	async function startListening() {
+		if (!videoFile) {
+			setStatus("Please upload a video first.");
+			return;
+		}
 
-    recognition.onstart = () => {
-      setIsListening(true);
-      setStatus("Listening...");
-    };
+		try {
+			const stream = await navigator.mediaDevices.getUserMedia({
+				audio: true
+			});
 
-    recognition.onresult = (event) => {
-      const lastResultIndex = event.results.length - 1;
-      const userCommand = event.results[lastResultIndex][0].transcript;
+			audioStreamRef.current = stream;
+			audioChunksRef.current = [];
 
-      handleUserCommand(userCommand);
-    };
+			const mediaRecorder = new MediaRecorder(stream);
+			mediaRecorderRef.current = mediaRecorder;
 
-    recognition.onerror = (event) => {
-      setIsListening(false);
-      recognitionRef.current = null;
+			mediaRecorder.onstart = () => {
+				setIsListening(true);
+				setStatus("Recording voice...");
+				speak("I'm listening.");
+			};
 
-      if (event.error === "not-allowed") {
-        setStatus("Microphone permission is blocked.");
-        return;
-      }
+			mediaRecorder.ondataavailable = (event) => {
+				if (event.data.size > 0) {
+					audioChunksRef.current.push(event.data);
+				}
+			};
 
-      if (event.error === "no-speech") {
-        setStatus("No speech detected.");
-        return;
-      }
+			mediaRecorder.onstop = async () => {
+				setStatus("Voice recorded. Processing...");
+				speak("Voice recorded. Processing your command.");
 
-      setStatus(`Speech recognition error: ${event.error}`);
-    };
+				const audioBlob = new Blob(audioChunksRef.current, {
+					type: "audio/webm"
+				});
 
-    recognition.onend = () => {
-      setIsListening(false);
-      recognitionRef.current = null;
-    };
+				audioChunksRef.current = [];
 
-    recognitionRef.current = recognition;
-    recognition.start();
-  }
+				await sendVoiceToServer(audioBlob);
 
-  function stopListening() {
-    if (recognitionRef.current) {
-      recognitionRef.current.stop();
-      recognitionRef.current = null;
-    }
+				if (audioStreamRef.current) {
+					audioStreamRef.current.getTracks().forEach((track) => {
+						track.stop();
+					});
 
-    setIsListening(false);
-    setStatus("");
-  }
+					audioStreamRef.current = null;
+				}
 
-  function toggleListening() {
-    if (isListening) {
-      stopListening();
-    } else {
-      startListening();
-    }
-  }
+				mediaRecorderRef.current = null;
+				setIsListening(false);
+			};
 
-  function handleUserCommand(command) {
-    const lowerCommand = command.toLowerCase();
+			mediaRecorder.start();
+		} catch (error) {
+			setIsListening(false);
 
-    if (lowerCommand.includes("explain")) {
-      if (videoRef.current) {
-        videoRef.current.pause();
-      }
+			if (error.name === "NotAllowedError") {
+				setStatus("Microphone permission is blocked.");
+				return;
+			}
 
-      setStatus("Explain command detected.");
-      return;
-    }
+			setStatus("Could not access microphone.");
+		}
+	}
 
-    setStatus(`Heard: ${command}`);
-  }
+	function stopListening() {
+		if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+			mediaRecorderRef.current.stop();
+			return;
+		}
 
-  function goHome() {
-    stopListening();
+		if (audioStreamRef.current) {
+			audioStreamRef.current.getTracks().forEach((track) => {
+				track.stop();
+			});
 
-    if (videoURL) {
-      URL.revokeObjectURL(videoURL);
-    }
+			audioStreamRef.current = null;
+		}
 
-    setVideoFile(null);
-    setVideoURL("");
-    setStatus("");
-  }
+		setIsListening(false);
+		setStatus("Recording stopped.");
+		speak("Recording stopped.");
+	}
 
-  useEffect(() => {
-    function handleKeyDown(event) {
-      if (event.repeat) return;
+	function toggleListening() {
+		if (isListening) {
+			stopListening();
+		} else {
+			startListening();
+		}
+	}
 
-      if (event.key.toLowerCase() === "q") {
-        event.preventDefault();
-        toggleListening();
-      }
-    }
+	function handleUserCommand(command) {
+		if (!command) {
+			setStatus("No command detected.");
+			return;
+		}
 
-    window.addEventListener("keydown", handleKeyDown);
+		const lowerCommand = command.toLowerCase();
 
-    return () => {
-      window.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [isListening, videoFile]);
+		if (lowerCommand.includes("explain")) {
+			if (videoRef.current) {
+				videoRef.current.pause();
+			}
 
-  useEffect(() => {
-    return () => {
-      if (videoURL) {
-        URL.revokeObjectURL(videoURL);
-      }
-    };
-  }, [videoURL]);
+			setStatus("Explain command detected.");
+			return;
+		}
 
-  return (
-    <div className="app">
-      {!videoFile ? (
-        <main className="upload-page">
-            <section className="upload-card">
-                <h1>EqualView</h1>
-                <p>Upload a video from your folder.</p>
+		setStatus(`Heard: ${command}`);
+	}
 
-                <label className="upload-box">
-                Choose Video
-                <input
-                    type="file"
-                    accept="video/*"
-                    onChange={handleVideoUpload}
-                    hidden
-                />
-                </label>
+	async function sendVoiceToServer(audioBlob) {
+		try {
+			setStatus("Sending voice to backend...");
 
-                <p className="status">{status}</p>
-            </section>
-        </main>
-      ) : (
-        <main className="player-page">
-          <header className="player-header">
-            <button className="brand-button" onClick={goHome}>
-              EqualView
-            </button>
-          </header>
+			const formData = new FormData();
+			formData.append("audio", audioBlob, "voice.webm");
 
-          <section className="video-section">
-            <video
-              ref={videoRef}
-              className="video-player"
-              src={videoURL}
-              controls
-            />
-          </section>
+			const response = await fetch("http://127.0.0.1:8000/api/voice-command", {
+				method: "POST",
+				body: formData
+			});
 
-          <section className="control-area">
-            <button
-              className={`record-button ${isListening ? "listening" : ""}`}
-              onClick={toggleListening}
-              aria-label={isListening ? "Stop listening" : "Start listening"}
-            >
-              <img
-                src={isListening ? recordingIcon: WaitingIcon}
-                alt=""
-                className="record-icon"
-              />
-            </button>
+			if (!response.ok) {
+				throw new Error("Backend failed.");
+			}
 
-            <p className="hint">Press Q or click the button</p>
-            <p className="status">{status}</p>
-          </section>
-        </main>
-      )}
-    </div>
-  );
+			const data = await response.json();
+
+			console.log("Backend response:", data);
+			setStatus(`Backend received audio: ${data.filename}`);
+		} catch (error) {
+			console.error(error);
+			setStatus("Failed to send voice to backend.");
+		}
+	}
+
+
+
+
+
+
+
+
+
+
+
+
+	async function extractAudioFromVideo() {
+		if (!videoFile) {
+			setStatus("Please upload a video first.");
+			return;
+		}
+
+		try {
+			setStatus("Sending video to backend...");
+
+			const formData = new FormData();
+			formData.append("video", videoFile);
+
+			const response = await fetch("http://127.0.0.1:8000/api/extract-audio", {
+				method: "POST",
+				body: formData
+			});
+
+			if (!response.ok) {
+				throw new Error("Backend failed to extract audio.");
+			}
+
+			const data = await response.json();
+
+			console.log("Extract audio response:", data);
+
+			setStatus(
+				`Audio extracted. JSON saved: ${data.json_file}`
+			);
+		} catch (error) {
+			console.error(error);
+			setStatus("Failed to extract audio from video.");
+		}
+	}
+
+	function goHome() {
+		stopListening();
+
+		if (videoURL) {
+			URL.revokeObjectURL(videoURL);
+		}
+
+		setVideoFile(null);
+		setVideoURL("");
+		setStatus("");
+	}
+
+	useEffect(() => {
+		function handleKeyDown(event) {
+			if (event.repeat) return;
+
+			if (event.key.toLowerCase() === "q") {
+				event.preventDefault();
+				toggleListening();
+			}
+		}
+
+		window.addEventListener("keydown", handleKeyDown);
+
+		return () => {
+			window.removeEventListener("keydown", handleKeyDown);
+		};
+	}, [isListening, videoFile]);
+
+	useEffect(() => {
+		return () => {
+			if (videoURL) {
+				URL.revokeObjectURL(videoURL);
+			}
+		};
+	}, [videoURL]);
+
+	return (
+		<div className="app">
+			{!videoFile ? (
+				<main className="upload-page">
+					<section className="upload-card">
+						<h1>EqualView</h1>
+						<p>Upload a video from your folder.</p>
+
+						<label className="upload-box">
+							Choose Video
+							<input
+								type="file"
+								accept="video/*"
+								onChange={handleVideoUpload}
+								hidden
+							/>
+						</label>
+
+						<p className="status">{status}</p>
+					</section>
+				</main>
+			) : (
+				<main className="player-page">
+					<header className="player-header">
+						<button className="brand-button" onClick={goHome}>
+							EqualView
+						</button>
+					</header>
+
+					<section className="video-section">
+						<video
+							ref={videoRef}
+							className="video-player"
+							src={videoURL}
+							controls
+						/>
+					</section>
+
+					<section className="control-area">
+						<button
+							className={`record-button ${isListening ? "listening" : ""}`}
+							onClick={toggleListening}
+							aria-label={isListening ? "Stop listening" : "Start listening"}
+						>
+							<img
+								src={isListening ? recordingIcon : WaitingIcon}
+								alt=""
+								className="record-icon"
+							/>
+						</button>
+
+						<p className="hint">Press Q or click the button</p>
+						<p className="status">{status}</p>
+					</section>
+				</main>
+			)}
+		</div>
+	);
 }
 
 export default App;
