@@ -11,6 +11,7 @@ import {
 	DownloadIcon
 } from "./icons/Icons";
 
+
 function ProcessingStep({ icon, title, state }) {
 	return (
 		<div className={`processing-step ${state}`}>

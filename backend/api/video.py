@@ -4,7 +4,14 @@ import uuid
 import json
 import asyncio
 
-from pipeline.audio_extractor import extract_audio_from_video, get_media_duration
+from pipeline.audio_extractor import (
+    extract_audio_from_video,
+    get_media_duration,
+    has_audio_stream,
+    create_silent_wav
+)
+
+from pipeline.transcriber import transcribe_audio, build_segments_from_words
 
 router = APIRouter()
 
@@ -33,70 +40,77 @@ async def extract_audio(video: UploadFile = File(...)):
     with open(video_path, "wb") as f:
         f.write(contents)
 
-    # 1. Real step: extract audio
-    extract_audio_from_video(video_path, audio_path)
+    video_duration = get_media_duration(video_path)
 
-    duration = get_media_duration(audio_path)
+    audio_exists = has_audio_stream(video_path)
 
-    # 2. Mock steps
-    await asyncio.sleep(0.5)  # analyzing scenes mock
-    await asyncio.sleep(0.5)  # generating narration mock
-    await asyncio.sleep(0.5)  # preparing output mock
+    if audio_exists:
+        extract_audio_from_video(video_path, audio_path)
+        audio_type = "extracted_audio"
+    else:
+        create_silent_wav(audio_path, video_duration)
+        audio_type = "silent_audio"
 
-    timeline_data = {
-        "id": file_id,
-        "original_video": video_filename,
-        "extracted_audio": audio_filename,
-        "audio_format": {
-            "type": "wav",
-            "sample_rate": 16000,
-            "channels": 1
+    if audio_exists:
+        script_result = transcribe_audio(audio_path)
+    else:
+        script_result = {
+            "language": None,
+            "language_probability": 0,
+            "transcript": "",
+            "words": []
+        }
+
+    segments = build_segments_from_words(
+        script_result["words"],
+        video_duration,
+        audio_exists
+    )
+
+    # mock steps for now
+    await asyncio.sleep(0.5)
+    await asyncio.sleep(0.5)
+
+    processing_steps = [
+        {
+            "key": "extracting_audio",
+            "label": "Extracting Audio",
+            "state": "completed"
         },
-        "duration": round(duration, 2),
-        "timeline": [
-            {
-                "start": 0,
-                "end": round(duration, 2),
-                "type": "audio",
-                "text": ""
-            }
-        ],
-        "processing_steps": [
-            {
-                "key": "extracting_audio",
-                "label": "Extracting Audio",
-                "state": "completed"
-            },
-            {
-                "key": "analyzing_scenes",
-                "label": "Analyzing Scenes",
-                "state": "completed",
-                "mock": True
-            },
-            {
-                "key": "generating_narration",
-                "label": "Generating Narration",
-                "state": "completed",
-                "mock": True
-            },
-            {
-                "key": "preparing_output",
-                "label": "Preparing Output",
-                "state": "completed",
-                "mock": True
-            }
-        ]
-    }
+        {
+            "key": "analyzing_scenes",
+            "label": "Analyzing Scenes",
+            "state": "completed",
+            "mock": True
+        },
+        {
+            "key": "generating_narration",
+            "label": "Generating Narration",
+            "state": "completed",
+            "mock": True
+        },
+        {
+            "key": "preparing_output",
+            "label": "Preparing Output",
+            "state": "completed",
+            "mock": True
+        }
+    ]
+
+    json_data = {
+    "segments": segments
+}
 
     with open(json_path, "w", encoding="utf-8") as f:
-        json.dump(timeline_data, f, ensure_ascii=False, indent=2)
+        json.dump(json_data, f, ensure_ascii=False, indent=2)
 
     return {
         "message": "Video processing completed",
         "video_file": video_filename,
         "audio_file": audio_filename,
         "json_file": json_filename,
-        "duration": round(duration, 2),
-        "timeline": timeline_data["timeline"],
-        "processing_steps": timeline_data["processing_steps"]
+        "duration": round(video_duration, 2),
+        "has_audio": audio_exists,
+        "audio_type": audio_type,
+        "processing_steps": processing_steps
     }
