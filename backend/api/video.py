@@ -55,10 +55,9 @@ async def extract_audio(video: UploadFile = File(...)):
         script_result = transcribe_audio(audio_path)
     else:
         script_result = {
-            "language": None,
-            "language_probability": 0,
-            "transcript": "",
-            "words": []
+            "language": "audio doesn't exist",
+            "transcript": "audio doesn't exist",
+            "words": "audio doesn't exist"
         }
 
     segments = build_segments_from_words(
