@@ -2,6 +2,7 @@ from fastapi import APIRouter, UploadFile, File
 from pathlib import Path
 import uuid
 import json
+import asyncio
 
 from pipeline.audio_extractor import extract_audio_from_video, get_media_duration
 
@@ -32,9 +33,15 @@ async def extract_audio(video: UploadFile = File(...)):
     with open(video_path, "wb") as f:
         f.write(contents)
 
+    # 1. Real step: extract audio
     extract_audio_from_video(video_path, audio_path)
 
     duration = get_media_duration(audio_path)
+
+    # 2. Mock steps
+    await asyncio.sleep(0.5)  # analyzing scenes mock
+    await asyncio.sleep(0.5)  # generating narration mock
+    await asyncio.sleep(0.5)  # preparing output mock
 
     timeline_data = {
         "id": file_id,
@@ -53,6 +60,31 @@ async def extract_audio(video: UploadFile = File(...)):
                 "type": "audio",
                 "text": ""
             }
+        ],
+        "processing_steps": [
+            {
+                "key": "extracting_audio",
+                "label": "Extracting Audio",
+                "state": "completed"
+            },
+            {
+                "key": "analyzing_scenes",
+                "label": "Analyzing Scenes",
+                "state": "completed",
+                "mock": True
+            },
+            {
+                "key": "generating_narration",
+                "label": "Generating Narration",
+                "state": "completed",
+                "mock": True
+            },
+            {
+                "key": "preparing_output",
+                "label": "Preparing Output",
+                "state": "completed",
+                "mock": True
+            }
         ]
     }
 
@@ -60,10 +92,11 @@ async def extract_audio(video: UploadFile = File(...)):
         json.dump(timeline_data, f, ensure_ascii=False, indent=2)
 
     return {
-        "message": "Audio extracted successfully",
+        "message": "Video processing completed",
         "video_file": video_filename,
         "audio_file": audio_filename,
         "json_file": json_filename,
         "duration": round(duration, 2),
-        "timeline": timeline_data["timeline"]
+        "timeline": timeline_data["timeline"],
+        "processing_steps": timeline_data["processing_steps"]
     }
