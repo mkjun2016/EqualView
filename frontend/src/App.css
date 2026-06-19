@@ -248,6 +248,23 @@ input {
 
 /* Processing stage */
 
+.progress-track {
+	width: min(78vw, 1100px);
+	height: 8px;
+	margin-top: 28px;
+
+	border-radius: 999px;
+	background: rgba(109, 93, 252, 0.1);
+	overflow: hidden;
+}
+
+.progress-fill {
+	height: 100%;
+	border-radius: inherit;
+	background: linear-gradient(90deg, #6d5dfc, #8b5cf6);
+	transition: width 0.4s ease;
+}
+
 .processing-steps {
 	width: min(78vw, 1100px);
 
@@ -330,6 +347,16 @@ input {
 
 .processing-step.completed .step-state {
 	color: #10b981;
+}
+
+.processing-step.failed .step-icon-circle {
+	background: rgba(239, 68, 68, 0.1);
+	color: #ef4444;
+	border-color: rgba(239, 68, 68, 0.2);
+}
+
+.processing-step.failed .step-state {
+	color: #ef4444;
 }
 
 /* Watching stage */

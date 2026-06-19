@@ -1,6 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import "./App.css";
 import {
+	createJob,
+	deriveProcessingSteps,
+	getJobSegments,
+	getJobStatus,
+	INITIAL_PROCESSING_STEPS,
+	sendVoiceCommand,
+} from "./api/equalview";
+import {
 	PlusIcon,
 	AudioIcon,
 	SceneIcon,
@@ -11,6 +19,7 @@ import {
 	DownloadIcon
 } from "./icons/Icons";
 
+const POLL_INTERVAL_MS = 2000;
 
 function ProcessingStep({ icon, title, state }) {
 	return (
@@ -25,6 +34,7 @@ function ProcessingStep({ icon, title, state }) {
 				{state === "in-progress" && "In progress"}
 				{state === "waiting" && "Waiting"}
 				{state === "completed" && "Completed"}
+				{state === "failed" && "Failed"}
 			</p>
 		</div>
 	);
@@ -35,6 +45,9 @@ function App() {
 	const [videoFile, setVideoFile] = useState(null);
 	const [videoURL, setVideoURL] = useState("");
 	const [thumbnailURL, setThumbnailURL] = useState("");
+	const [jobId, setJobId] = useState(null);
+	const [segments, setSegments] = useState([]);
+	const [jobProgress, setJobProgress] = useState(0);
 	const [isListening, setIsListening] = useState(false);
 	const [status, setStatus] = useState("");
 
@@ -43,12 +56,7 @@ function App() {
 	const audioStreamRef = useRef(null);
 	const audioChunksRef = useRef([]);
 
-	const [processingSteps, setProcessingSteps] = useState([
-		{ key: "extracting_audio", title: "Extracting Audio", state: "in-progress" },
-		{ key: "analyzing_scenes", title: "Analyzing Scenes", state: "waiting" },
-		{ key: "generating_narration", title: "Generating Narration", state: "waiting" },
-		{ key: "preparing_output", title: "Preparing Output", state: "waiting" }
-	]);
+	const [processingSteps, setProcessingSteps] = useState(INITIAL_PROCESSING_STEPS);
 
 	async function handleVideoUpload(event) {
 		const file = event.target.files[0];
@@ -59,24 +67,24 @@ function App() {
 
 		setVideoFile(file);
 		setVideoURL(url);
+		setJobId(null);
+		setSegments([]);
+		setJobProgress(0);
+		setProcessingSteps(INITIAL_PROCESSING_STEPS);
 		setPhase("processing");
-		setStatus("Preparing video...");
+		setStatus("Uploading video...");
 
 		try {
 			const thumbnail = await createVideoThumbnail(file);
 			setThumbnailURL(thumbnail);
 
-			await extractAudioFromVideo(file);
-
-			setStatus("Processing completed.");
-
-			setTimeout(() => {
-				setPhase("watching");
-				setStatus("");
-			}, 900);
+			const { job_id } = await createJob(file);
+			setJobId(job_id);
+			setStatus("Waiting for worker...");
 		} catch (error) {
 			console.error(error);
-			setStatus("Failed to process the video.");
+			setStatus("Failed to start video processing.");
+			setPhase("upload");
 		}
 	}
 
@@ -113,52 +121,6 @@ function App() {
 				reject(new Error("Could not create video thumbnail."));
 			};
 		});
-	}
-
-	async function extractAudioFromVideo(file) {
-		setStatus("Processing video...");
-
-		const formData = new FormData();
-		formData.append("video", file);
-
-		const response = await fetch("http://localhost:8000/api/extract-audio", {
-			method: "POST",
-			body: formData
-		});
-
-		if (!response.ok) {
-			throw new Error("Backend failed to extract audio.");
-		}
-
-		const data = await response.json();
-		console.log("Extract audio response:", data);
-
-		if (data.processing_steps) {
-			setProcessingSteps([
-				{
-					key: "extracting_audio",
-					title: "Extracting Audio",
-					state: "completed"
-				},
-				{
-					key: "analyzing_scenes",
-					title: "Analyzing Scenes",
-					state: "completed"
-				},
-				{
-					key: "generating_narration",
-					title: "Generating Narration",
-					state: "completed"
-				},
-				{
-					key: "preparing_output",
-					title: "Preparing Output",
-					state: "completed"
-				}
-			]);
-		}
-
-		return data;
 	}
 
 	function speak(text) {
@@ -213,7 +175,7 @@ function App() {
 
 				audioChunksRef.current = [];
 
-				await sendVoiceToServer(audioBlob);
+				await handleVoiceUpload(audioBlob);
 
 				if (audioStreamRef.current) {
 					audioStreamRef.current.getTracks().forEach((track) => {
@@ -286,23 +248,11 @@ function App() {
 		setStatus(`Heard: ${command}`);
 	}
 
-	async function sendVoiceToServer(audioBlob) {
+	async function handleVoiceUpload(audioBlob) {
 		try {
 			setStatus("Sending voice to backend...");
 
-			const formData = new FormData();
-			formData.append("audio", audioBlob, "voice.webm");
-
-			const response = await fetch("http://localhost:8000/api/voice-command", {
-				method: "POST",
-				body: formData
-			});
-
-			if (!response.ok) {
-				throw new Error("Backend failed.");
-			}
-
-			const data = await response.json();
+			const data = await sendVoiceCommand(audioBlob);
 
 			console.log("Backend response:", data);
 
@@ -318,6 +268,24 @@ function App() {
 		}
 	}
 
+	function downloadSegments() {
+		if (!segments.length) {
+			setStatus("No segments available to download.");
+			return;
+		}
+
+		const blob = new Blob([JSON.stringify({ segments }, null, 2)], {
+			type: "application/json",
+		});
+		const url = URL.createObjectURL(blob);
+		const anchor = document.createElement("a");
+		anchor.href = url;
+		anchor.download = `segments-${jobId || "result"}.json`;
+		anchor.click();
+		URL.revokeObjectURL(url);
+		setStatus("Segments downloaded.");
+	}
+
 	function goHome() {
 		stopListening();
 
@@ -329,15 +297,60 @@ function App() {
 		setVideoFile(null);
 		setVideoURL("");
 		setThumbnailURL("");
+		setJobId(null);
+		setSegments([]);
+		setJobProgress(0);
 		setStatus("");
-
-		setProcessingSteps([
-			{ key: "extracting_audio", title: "Extracting Audio", state: "in-progress" },
-			{ key: "analyzing_scenes", title: "Analyzing Scenes", state: "waiting" },
-			{ key: "generating_narration", title: "Generating Narration", state: "waiting" },
-			{ key: "preparing_output", title: "Preparing Output", state: "waiting" }
-		]);
+		setProcessingSteps(INITIAL_PROCESSING_STEPS);
 	}
+
+	useEffect(() => {
+		if (phase !== "processing" || !jobId) return;
+
+		let cancelled = false;
+
+		async function pollJob() {
+			try {
+				const job = await getJobStatus(jobId);
+				if (cancelled) return;
+
+				setJobProgress(job.progress ?? 0);
+				setProcessingSteps(deriveProcessingSteps(job.progress ?? 0, job.status));
+				setStatus(
+					job.current_step
+						? `${job.current_step} (${job.progress ?? 0}%)`
+						: ""
+				);
+
+				if (job.status === "COMPLETED") {
+					const data = await getJobSegments(jobId);
+					if (cancelled) return;
+
+					setSegments(data.segments ?? []);
+					setPhase("watching");
+					setStatus("");
+					return;
+				}
+
+				if (job.status === "FAILED") {
+					setStatus(job.error || "Processing failed.");
+				}
+			} catch (error) {
+				console.error(error);
+				if (!cancelled) {
+					setStatus("Failed to check job status.");
+				}
+			}
+		}
+
+		pollJob();
+		const intervalId = setInterval(pollJob, POLL_INTERVAL_MS);
+
+		return () => {
+			cancelled = true;
+			clearInterval(intervalId);
+		};
+	}, [phase, jobId]);
 
 	useEffect(() => {
 		function handleKeyDown(event) {
@@ -364,6 +377,9 @@ function App() {
 			}
 		};
 	}, [videoURL]);
+
+	const speechCount = segments.filter((segment) => segment.type === "speech").length;
+	const silenceCount = segments.filter((segment) => segment.type === "non_speech").length;
 
 	return (
 		<div className="app">
@@ -412,6 +428,13 @@ function App() {
 						</section>
 					</div>
 
+					<div className="progress-track">
+						<div
+							className="progress-fill"
+							style={{ width: `${jobProgress}%` }}
+						/>
+					</div>
+
 					<section className="processing-steps">
 						<ProcessingStep
 							icon={<AudioIcon />}
@@ -438,7 +461,7 @@ function App() {
 						/>
 					</section>
 
-				
+					<p className="status">{status}</p>
 				</main>
 			)}
 
@@ -457,16 +480,18 @@ function App() {
 						<button
 							className="download-button"
 							type="button"
-							onClick={() => {
-								setStatus("Download will be available later.");
-							}}
-							aria-label="Download narrated video"
+							onClick={downloadSegments}
+							aria-label="Download segments JSON"
 						>
 							<DownloadIcon />
 						</button>
 					</section>
 
 					<section className="watch-controls">
+						<p className="hint">
+							Analysis complete: {speechCount} speech / {silenceCount} non-speech segments
+						</p>
+
 						<button
 							className={`record-button ${isListening ? "listening" : ""}`}
 							onClick={toggleListening}

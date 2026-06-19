@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from api.jobs import router as jobs_router
 from api.voice import router as voice_router
 from api.video import router as video_router
 
@@ -17,6 +18,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(jobs_router)
 app.include_router(voice_router)
 app.include_router(video_router)
 

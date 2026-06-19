@@ -1,20 +1,28 @@
 from pathlib import Path
+
 from faster_whisper import WhisperModel
 
+_model: WhisperModel | None = None
 
-model = WhisperModel(
-    "base",
-    device="cpu",
-    compute_type="int8"
-)
+
+def get_whisper_model() -> WhisperModel:
+    global _model
+    if _model is None:
+        _model = WhisperModel(
+            "base",
+            device="cpu",
+            compute_type="int8",
+        )
+    return _model
 
 
 def transcribe_audio(audio_path: Path):
+    model = get_whisper_model()
     segments, info = model.transcribe(
         str(audio_path),
         beam_size=5,
         word_timestamps=True,
-        vad_filter=True
+        vad_filter=True,
     )
 
     words = []
@@ -36,14 +44,14 @@ def transcribe_audio(audio_path: Path):
                 words.append({
                     "word": clean_word,
                     "start": round(word.start, 2),
-                    "end": round(word.end, 2)
+                    "end": round(word.end, 2),
                 })
 
     return {
         "language": info.language,
         "language_probability": round(info.language_probability, 3),
         "transcript": " ".join(transcript_parts),
-        "words": words
+        "words": words,
     }
 
 
@@ -57,7 +65,7 @@ def build_segments_from_words(words, duration, has_audio):
                 "end": duration,
                 "type": "non_speech",
                 "sound_category": "no_audio_track",
-                "text": ""
+                "text": "",
             }
         ]
 
@@ -68,15 +76,13 @@ def build_segments_from_words(words, duration, has_audio):
                 "end": duration,
                 "type": "non_speech",
                 "sound_category": "audio_exists_but_no_detected_speech",
-                "text": ""
+                "text": "",
             }
         ]
 
     segments = []
-    # 대사와 대사 사이가 0.7초 이상이면 대사가 끊겼다고 보고 non_speech 구간 생성
     gap_threshold = 0.7
 
-    cursor = 0
     current_words = [words[0]]
     current_start = words[0]["start"]
     current_end = words[0]["end"]
@@ -87,7 +93,7 @@ def build_segments_from_words(words, duration, has_audio):
             "end": round(current_start, 2),
             "type": "non_speech",
             "sound_category": "silence_or_background",
-            "text": ""
+            "text": "",
         })
 
     for i in range(1, len(words)):
@@ -103,7 +109,7 @@ def build_segments_from_words(words, duration, has_audio):
                 "type": "speech",
                 "sound_category": "human_speech",
                 "text": " ".join([w["word"] for w in current_words]),
-                "words": current_words
+                "words": current_words,
             })
 
             segments.append({
@@ -111,13 +117,12 @@ def build_segments_from_words(words, duration, has_audio):
                 "end": round(curr["start"], 2),
                 "type": "non_speech",
                 "sound_category": "silence_or_background",
-                "text": ""
+                "text": "",
             })
 
             current_words = [curr]
             current_start = curr["start"]
             current_end = curr["end"]
-
         else:
             current_words.append(curr)
             current_end = curr["end"]
@@ -128,7 +133,7 @@ def build_segments_from_words(words, duration, has_audio):
         "type": "speech",
         "sound_category": "human_speech",
         "text": " ".join([w["word"] for w in current_words]),
-        "words": current_words
+        "words": current_words,
     })
 
     last_end = words[-1]["end"]
@@ -139,7 +144,7 @@ def build_segments_from_words(words, duration, has_audio):
             "end": duration,
             "type": "non_speech",
             "sound_category": "silence_or_background",
-            "text": ""
+            "text": "",
         })
 
     return segments
