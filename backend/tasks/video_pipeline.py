@@ -1,0 +1,108 @@
+import importlib
+import os
+import sys
+import time
+from pathlib import Path
+
+BACKEND_DIR = Path(__file__).resolve().parent.parent
+
+
+def _ensure_backend_path() -> None:
+    backend = str(BACKEND_DIR)
+    if backend not in sys.path:
+        sys.path.insert(0, backend)
+    os.chdir(backend)
+
+
+_ensure_backend_path()
+
+from celery_app import celery_app
+from services.job_store import job_store
+
+
+@celery_app.task(name="tasks.process_video_job")
+def process_video_job(job_id: str) -> None:
+    try:
+        _ensure_backend_path()
+        runner = importlib.import_module("pipeline.runner")
+        runner.run_analysis(job_id, job_store)
+        _run_mock_final_steps_if_ready(job_id)
+    except Exception as exc:
+        job_store.update(
+            job_id,
+            status="FAILED",
+            error=str(exc),
+            current_step="실패",
+        )
+        raise
+
+@celery_app.task(name="tasks.process_face_job")
+def process_face_job(job_id: str) -> None:
+    try:
+        _ensure_backend_path()
+
+        job_store.update(
+            job_id,
+            face_status="PROCESSING",
+            face_progress=10,
+            face_current_step="얼굴 분석 시작",
+            face_error=None,
+        )
+
+        runner = importlib.import_module("pipeline.face_runner")
+
+        result = runner.run_face_analysis(job_id)
+
+        job_store.update(
+            job_id,
+            face_status="COMPLETED",
+            face_progress=100,
+            face_current_step="얼굴 분석 완료",
+            face_error=None,
+            face_result=result,
+        )
+        _run_mock_final_steps_if_ready(job_id)
+
+    except Exception as exc:
+        job_store.update(
+            job_id,
+            face_status="FAILED",
+            face_error=str(exc),
+            face_current_step="얼굴 분석 실패",
+        )
+        raise
+
+
+def _run_mock_final_steps_if_ready(job_id: str) -> None:
+    job_data = job_store.get(job_id)
+    if job_data is None:
+        return
+
+    if (
+        job_data.get("status") != "COMPLETED"
+        or job_data.get("face_status") != "COMPLETED"
+        or job_data.get("narration_status", "PENDING") != "PENDING"
+        or job_data.get("combine_status", "PENDING") != "PENDING"
+    ):
+        return
+
+    job_store.update(
+        job_id,
+        narration_status="PROCESSING",
+        current_step="Generating narration",
+    )
+    time.sleep(0.5)
+
+    job_store.update(
+        job_id,
+        narration_status="COMPLETED",
+        combine_status="PROCESSING",
+        current_step="Combining audio",
+    )
+    time.sleep(0.5)
+
+    job_store.update(
+        job_id,
+        combine_status="COMPLETED",
+        current_step="Processing complete",
+    )

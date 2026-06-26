@@ -1,0 +1,11 @@
+fastapi
+uvicorn
+python-multipart
+faster-whisper
+celery
+redis
+imageio-ffmpeg
+insightface
+onnxruntime
+opencv-python
+numpy
