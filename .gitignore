@@ -39,7 +39,6 @@ Thumbs.db
 .vscode/
 .idea/
 
-
 backend/models/
 backend/venv/
 frontend/node_modules/

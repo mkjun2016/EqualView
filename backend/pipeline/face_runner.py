@@ -202,7 +202,7 @@ def _sample_interval_seconds() -> float:
 
 
 def _frame_filename(timestamp: float) -> str:
-    return f"frame_{timestamp:.1f}.jpg"
+    return f"frame_{timestamp:.2f}.jpg"
 
 
 def _frame_fingerprint(frame: np.ndarray) -> np.ndarray:
