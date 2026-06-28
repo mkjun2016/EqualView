@@ -121,9 +121,61 @@ UPLOAD_DIR=/app/uploads
 | `POST` | `/api/jobs` | 영상 업로드 → `{ job_id, status: "PENDING" }` |
 | `GET` | `/api/jobs/{job_id}` | Job 상태 폴링 |
 | `GET` | `/api/jobs/{job_id}/segments` | 분석 결과 (COMPLETED 후) |
-| `POST` | `/api/extract-audio` | 레거시 동기 API (유지) |
+| `GET` | `/api/jobs/{job_id}/segments/enriched` | enriched segment JSON (COMPLETED 후) |
 
 ---
+
+## 테스트
+
+`segments_enriched.json` 생성·merge·API는 **영상 업로드 없이** pytest로 검증할 수 있습니다.
+
+### 로컬 venv
+
+```bash
+cd backend
+pip install -r requirements-dev.txt
+pytest tests/ -q
+# 또는 프로젝트 루트에서
+make test
+```
+
+특정 파일만:
+
+```bash
+cd backend
+pytest tests/test_segment_enricher.py -q
+pytest tests/test_jobs_api.py -q
+```
+
+### Docker
+
+```bash
+docker compose run --rm api sh -c "pip install -q -r requirements-dev.txt && pytest tests/ -q"
+```
+
+### 수동 API 확인 (실제 Job 완료 후)
+
+```bash
+# Job 생성 (영상 업로드)
+curl -s -X POST http://localhost:8000/api/jobs \
+  -F "file=@/path/to/video.mp4" | jq .
+
+# 상태 폴링
+curl -s http://localhost:8000/api/jobs/{job_id} | jq .
+
+# 기존 segments (raw)
+curl -s http://localhost:8000/api/jobs/{job_id}/segments | jq .
+
+# enriched segments
+curl -s http://localhost:8000/api/jobs/{job_id}/segments/enriched | jq .
+```
+
+Job 파일 직접 확인:
+
+```bash
+ls uploads/{job_id}/
+# segments.json, segments_enriched.json, audio.wav, job.json ...
+```
 
 ## 아키텍처
 

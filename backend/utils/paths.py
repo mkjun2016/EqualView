@@ -17,6 +17,14 @@ class JobPaths:
         return self.job_dir / "segments.json"
 
     @property
+    def segments_enriched_json(self) -> Path:
+        return self.job_dir / "segments_enriched.json"
+
+    @property
+    def face_frames_json(self) -> Path:
+        return self.job_dir / "face_frames.json"
+
+    @property
     def audio_wav(self) -> Path:
         return self.job_dir / "audio.wav"
 
