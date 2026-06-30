@@ -91,6 +91,31 @@ export function isJobAnalysisComplete(job) {
   )
 }
 
+export const JOB_POLL_DELAYS_MS = [2000, 3000, 5000]
+
+export function createJobPollSnapshot(job) {
+  return JSON.stringify({
+    status: job?.status ?? null,
+    progress: job?.progress ?? 0,
+    current_step: job?.current_step ?? null,
+    face_status: job?.face_status ?? null,
+    face_progress: job?.face_progress ?? 0,
+    face_current_step: job?.face_current_step ?? null,
+  })
+}
+
+export function nextJobPollDelayIndex(currentIndex, previousSnapshot, nextSnapshot) {
+  if (previousSnapshot === null || previousSnapshot !== nextSnapshot) {
+    return 0
+  }
+
+  return Math.min(currentIndex + 1, JOB_POLL_DELAYS_MS.length - 1)
+}
+
+export function getJobPollDelayMs(delayIndex) {
+  return JOB_POLL_DELAYS_MS[Math.min(delayIndex, JOB_POLL_DELAYS_MS.length - 1)]
+}
+
 export function deriveOverallProgress(job) {
   const speechProgress = job?.progress ?? 0
   const faceProgress = job?.face_progress ?? 0

@@ -3,14 +3,17 @@ import "./App.css";
 import {
 	collectPreviewFrames,
 	createJob,
+	createJobPollSnapshot,
 	deriveOverallProgress,
 	deriveProcessingSteps,
 	formatJobStatusMessage,
 	getAnnotatedFrameUrl,
+	getJobPollDelayMs,
 	getJobSegmentsEnriched,
 	getJobStatus,
 	INITIAL_PROCESSING_STEPS,
 	isJobAnalysisComplete,
+	nextJobPollDelayIndex,
 	sendVoiceCommand,
 } from "./api/equalview";
 import {
@@ -23,8 +26,6 @@ import {
 	CheckIcon,
 	DownloadIcon
 } from "./icons/Icons";
-
-const POLL_INTERVAL_MS = 2000;
 
 function ProcessingStep({ icon, title, state }) {
 	return (
@@ -342,11 +343,26 @@ function App() {
 		if (phase !== "processing" || !jobId) return;
 
 		let cancelled = false;
+		let timeoutId = null;
+		let delayIndex = 0;
+		let previousSnapshot = null;
+
+		function scheduleNextPoll() {
+			timeoutId = setTimeout(pollJob, getJobPollDelayMs(delayIndex));
+		}
 
 		async function pollJob() {
 			try {
 				const job = await getJobStatus(jobId);
 				if (cancelled) return;
+
+				const snapshot = createJobPollSnapshot(job);
+				delayIndex = nextJobPollDelayIndex(
+					delayIndex,
+					previousSnapshot,
+					snapshot,
+				);
+				previousSnapshot = snapshot;
 
 				setJobProgress(deriveOverallProgress(job));
 				setProcessingSteps(deriveProcessingSteps(job));
@@ -366,20 +382,22 @@ function App() {
 					setStatus("");
 					return;
 				}
+
+				scheduleNextPoll();
 			} catch (error) {
 				console.error(error);
 				if (!cancelled) {
 					setStatus(error.message || "Failed to check job status.");
+					scheduleNextPoll();
 				}
 			}
 		}
 
 		pollJob();
-		const intervalId = setInterval(pollJob, POLL_INTERVAL_MS);
 
 		return () => {
 			cancelled = true;
-			clearInterval(intervalId);
+			if (timeoutId) clearTimeout(timeoutId);
 		};
 	}, [phase, jobId]);
 
