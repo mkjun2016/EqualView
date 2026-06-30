@@ -1,0 +1,14 @@
+fastapi
+uvicorn
+python-multipart
+faster-whisper
+celery
+redis
+imageio-ffmpeg
+insightface
+opencv-python-headless
+numpy
+
+# Windows local GPU acceleration for Intel/AMD/NVIDIA through DirectML.
+# This replaces the plain onnxruntime package from requirements.txt.
+onnxruntime-directml

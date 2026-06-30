@@ -1,11 +1,16 @@
 import { useEffect, useRef, useState } from "react";
 import "./App.css";
 import {
+	collectPreviewFrames,
 	createJob,
+	deriveOverallProgress,
 	deriveProcessingSteps,
-	getJobSegments,
+	formatJobStatusMessage,
+	getAnnotatedFrameUrl,
+	getJobSegmentsEnriched,
 	getJobStatus,
 	INITIAL_PROCESSING_STEPS,
+	isJobAnalysisComplete,
 	sendVoiceCommand,
 } from "./api/equalview";
 import {
@@ -40,13 +45,42 @@ function ProcessingStep({ icon, title, state }) {
 	);
 }
 
+function FramePreviewCard({ jobId, frame }) {
+	const imageUrl = getAnnotatedFrameUrl(jobId, frame);
+	const personLabel = frame.personIds?.length
+		? frame.personIds.join(", ")
+		: "No faces";
+
+	return (
+		<article className="frame-preview-card">
+			<div className="frame-preview-image-wrap">
+				{imageUrl ? (
+					<img
+						className="frame-preview-image"
+						src={imageUrl}
+						alt={`Annotated frame at ${frame.timestamp}s`}
+						loading="lazy"
+					/>
+				) : (
+					<div className="frame-preview-placeholder">No image</div>
+				)}
+			</div>
+			<div className="frame-preview-meta">
+				<p className="frame-preview-time">{frame.timestamp.toFixed(2)}s</p>
+				<p className="frame-preview-segment">{frame.segmentId}</p>
+				<p className="frame-preview-persons">{personLabel}</p>
+			</div>
+		</article>
+	);
+}
+
 function App() {
 	const [phase, setPhase] = useState("upload");
 	const [videoFile, setVideoFile] = useState(null);
 	const [videoURL, setVideoURL] = useState("");
 	const [thumbnailURL, setThumbnailURL] = useState("");
 	const [jobId, setJobId] = useState(null);
-	const [segments, setSegments] = useState([]);
+	const [enrichedResult, setEnrichedResult] = useState(null);
 	const [jobProgress, setJobProgress] = useState(0);
 	const [isListening, setIsListening] = useState(false);
 	const [status, setStatus] = useState("");
@@ -68,7 +102,7 @@ function App() {
 		setVideoFile(file);
 		setVideoURL(url);
 		setJobId(null);
-		setSegments([]);
+		setEnrichedResult(null);
 		setJobProgress(0);
 		setProcessingSteps(INITIAL_PROCESSING_STEPS);
 		setPhase("processing");
@@ -268,22 +302,22 @@ function App() {
 		}
 	}
 
-	function downloadSegments() {
-		if (!segments.length) {
-			setStatus("No segments available to download.");
+	function downloadEnrichedResult() {
+		if (!enrichedResult) {
+			setStatus("No enriched result available to download.");
 			return;
 		}
 
-		const blob = new Blob([JSON.stringify({ segments }, null, 2)], {
+		const blob = new Blob([JSON.stringify(enrichedResult, null, 2)], {
 			type: "application/json",
 		});
 		const url = URL.createObjectURL(blob);
 		const anchor = document.createElement("a");
 		anchor.href = url;
-		anchor.download = `segments-${jobId || "result"}.json`;
+		anchor.download = `segments_enriched-${jobId || "result"}.json`;
 		anchor.click();
 		URL.revokeObjectURL(url);
-		setStatus("Segments downloaded.");
+		setStatus("Enriched segments downloaded.");
 	}
 
 	function goHome() {
@@ -298,7 +332,7 @@ function App() {
 		setVideoURL("");
 		setThumbnailURL("");
 		setJobId(null);
-		setSegments([]);
+		setEnrichedResult(null);
 		setJobProgress(0);
 		setStatus("");
 		setProcessingSteps(INITIAL_PROCESSING_STEPS);
@@ -314,31 +348,28 @@ function App() {
 				const job = await getJobStatus(jobId);
 				if (cancelled) return;
 
-				setJobProgress(job.progress ?? 0);
-				setProcessingSteps(deriveProcessingSteps(job.progress ?? 0, job.status));
-				setStatus(
-					job.current_step
-						? `${job.current_step} (${job.progress ?? 0}%)`
-						: ""
-				);
+				setJobProgress(deriveOverallProgress(job));
+				setProcessingSteps(deriveProcessingSteps(job));
+				setStatus(formatJobStatusMessage(job));
 
-				if (job.status === "COMPLETED") {
-					const data = await getJobSegments(jobId);
+				if (job.status === "FAILED") {
+					setStatus(job.error || "Processing failed.");
+					return;
+				}
+
+				if (isJobAnalysisComplete(job)) {
+					const data = await getJobSegmentsEnriched(jobId);
 					if (cancelled) return;
 
-					setSegments(data.segments ?? []);
+					setEnrichedResult(data);
 					setPhase("watching");
 					setStatus("");
 					return;
 				}
-
-				if (job.status === "FAILED") {
-					setStatus(job.error || "Processing failed.");
-				}
 			} catch (error) {
 				console.error(error);
 				if (!cancelled) {
-					setStatus("Failed to check job status.");
+					setStatus(error.message || "Failed to check job status.");
 				}
 			}
 		}
@@ -378,8 +409,14 @@ function App() {
 		};
 	}, [videoURL]);
 
-	const speechCount = segments.filter((segment) => segment.type === "speech").length;
-	const silenceCount = segments.filter((segment) => segment.type === "non_speech").length;
+	const summary = enrichedResult?.summary ?? {};
+	const speechCount = summary.speech_segments ?? 0;
+	const silenceCount = summary.non_speech_segments ?? 0;
+	const narrationCandidates = summary.narration_candidate_count ?? 0;
+	const faceCompletedCount = (enrichedResult?.segments ?? []).filter(
+		(segment) => segment.persons?.face_status === "completed"
+	).length;
+	const previewFrames = collectPreviewFrames(enrichedResult);
 
 	return (
 		<div className="app">
@@ -480,16 +517,45 @@ function App() {
 						<button
 							className="download-button"
 							type="button"
-							onClick={downloadSegments}
-							aria-label="Download segments JSON"
+							onClick={downloadEnrichedResult}
+							aria-label="Download enriched segments JSON"
 						>
 							<DownloadIcon />
 						</button>
 					</section>
 
+					{previewFrames.length > 0 ? (
+						<section className="frame-preview-section">
+							<div className="frame-preview-header">
+								<h2 className="frame-preview-title">Representative frames</h2>
+								<p className="frame-preview-subtitle">
+									{previewFrames.length} annotated frame
+									{previewFrames.length === 1 ? "" : "s"} selected for narration
+								</p>
+							</div>
+							<div className="frame-preview-grid">
+								{previewFrames.map((frame) => (
+									<FramePreviewCard
+										key={`${frame.segmentId}-${frame.frame_id}-${frame.timestamp}`}
+										jobId={jobId}
+										frame={frame}
+									/>
+								))}
+							</div>
+						</section>
+					) : (
+						<p className="hint frame-preview-empty">
+							No annotated frames yet. Face analysis may still be missing for this job.
+						</p>
+					)}
+
 					<section className="watch-controls">
 						<p className="hint">
-							Analysis complete: {speechCount} speech / {silenceCount} non-speech segments
+							Analysis complete: {speechCount} speech / {silenceCount} non-speech
+							{" · "}
+							{narrationCandidates} narration candidates
+							{" · "}
+							{faceCompletedCount} with face data
 						</p>
 
 						<button

@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi.responses import FileResponse
 import uuid
 
 from config import UPLOAD_DIR
@@ -30,9 +31,18 @@ async def create_job(file: UploadFile = File(...)):
     with open(input_path, "wb") as f:
         f.write(contents)
 
-    job_store.create(job_id, {})
+    job_store.create(
+        job_id,
+        {
+            "face_status": "PENDING",
+            "face_progress": 0,
+            "face_current_step": "얼굴 분석 대기 중",
+            "face_error": None,
+        },
+    )
 
     celery_app.send_task("tasks.process_video_job", args=[job_id])
+    celery_app.send_task("tasks.process_face_job", args=[job_id])
 
     return {"job_id": job_id, "status": "PENDING"}
 
@@ -72,6 +82,24 @@ def get_job_segments_enriched(job_id: str):
         raise HTTPException(status_code=404, detail="Enriched segments file not found")
 
     return read_json(paths.segments_enriched_json)
+
+
+@router.get("/api/jobs/{job_id}/frames/{filename}")
+def get_annotated_frame(job_id: str, filename: str):
+    if not job_store.exists(job_id):
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    safe_name = Path(filename).name
+    if safe_name != filename:
+        raise HTTPException(status_code=400, detail="Invalid frame filename")
+
+    paths = JobPaths(job_id)
+    frame_path = paths.annotated_frames_dir / safe_name
+
+    if not frame_path.exists():
+        raise HTTPException(status_code=404, detail="Frame not found")
+
+    return FileResponse(frame_path, media_type="image/jpeg")
 
 
 @router.get("/api/jobs/{job_id}/segments")

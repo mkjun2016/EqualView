@@ -5,7 +5,11 @@ from pipeline.audio_extractor import (
     get_media_duration,
     has_audio_stream,
 )
-from pipeline.segment_enricher import build_segments_enriched, save_segments_enriched
+from pipeline.segment_enricher import (
+    build_segments_enriched,
+    save_segments_enriched,
+    try_merge_face_segments_for_job,
+)
 from pipeline.transcriber import build_segments_from_words, transcribe_audio
 from utils.ffmpeg_paths import get_video_metadata
 from utils.json_io import atomic_write_json
@@ -72,6 +76,7 @@ def run_analysis(job_id: str, store: JobStore) -> dict:
         language=language,
     )
     save_segments_enriched(job_id, enriched)
+    try_merge_face_segments_for_job(job_id)
 
     store.update(
         job_id,

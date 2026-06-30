@@ -99,3 +99,21 @@ def test_get_job_segments_enriched_not_found_when_missing_file(client, upload_di
 
     response = client.get(f"/api/jobs/{JOB_ID}/segments/enriched")
     assert response.status_code == 404
+
+
+def test_get_annotated_frame(client, completed_job):
+    frame_name = "frame_1.00.jpg"
+    frame_path = completed_job.annotated_frames_dir / frame_name
+    completed_job.annotated_frames_dir.mkdir(parents=True, exist_ok=True)
+    frame_path.write_bytes(b"fake-jpeg")
+
+    response = client.get(f"/api/jobs/{JOB_ID}/frames/{frame_name}")
+
+    assert response.status_code == 200, response.text
+    assert response.headers["content-type"] == "image/jpeg"
+    assert response.content == b"fake-jpeg"
+
+
+def test_get_annotated_frame_not_found(client, completed_job):
+    response = client.get(f"/api/jobs/{JOB_ID}/frames/missing.jpg")
+    assert response.status_code == 404

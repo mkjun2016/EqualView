@@ -4,9 +4,12 @@ from pathlib import Path
 import pytest
 
 from pipeline.segment_enricher import (
+    adapt_face_segments_samples,
     build_segments_enriched,
     merge_face_frames_into_segments,
+    merge_face_segments_into_segments,
     save_segments_enriched,
+    try_merge_face_segments_for_job,
 )
 from utils.json_io import read_json
 from utils.paths import JobPaths
@@ -290,3 +293,220 @@ def test_merge_face_frames_missing_when_no_matching_frames(upload_dir, enriched)
     candidate = merged["segments"][2]
     assert candidate["frames"] == []
     assert candidate["persons"]["face_status"] == "missing"
+
+
+MOCK_FACE_SEGMENTS = {
+    "schema_version": "1.0",
+    "source": {
+        "duration": 12.0,
+        "fps": 24.0,
+        "width": 1920,
+        "height": 1080,
+    },
+    "identities": [
+        {
+            "person_id": "person_001",
+            "color": "#EF4444",
+        }
+    ],
+    "samples": [
+        {
+            "timestamp": 5.5,
+            "path": "annotated_frames/frame_5.50.jpg",
+            "visible_person_ids": ["person_001"],
+            "faces": [
+                {
+                    "person_id": "person_001",
+                    "color": "#EF4444",
+                    "confidence": 0.94,
+                    "bbox": {
+                        "x": 0.21875,
+                        "y": 0.0625,
+                        "w": 0.072917,
+                        "h": 0.098958,
+                    },
+                }
+            ],
+        },
+        {
+            "timestamp": 6.0,
+            "path": "annotated_frames/frame_6.00.jpg",
+            "visible_person_ids": [],
+            "faces": [],
+        },
+        {
+            "timestamp": 7.0,
+            "path": "annotated_frames/frame_7.00.jpg",
+            "visible_person_ids": ["person_001"],
+            "faces": [
+                {
+                    "person_id": "person_001",
+                    "color": "#EF4444",
+                    "confidence": 0.91,
+                    "bbox": {
+                        "x": 0.2240,
+                        "y": 0.0651,
+                        "w": 0.072917,
+                        "h": 0.098958,
+                    },
+                }
+            ],
+        },
+    ],
+}
+
+
+def test_adapt_face_segments_samples():
+    adapted = adapt_face_segments_samples(MOCK_FACE_SEGMENTS, JOB_ID)
+
+    assert len(adapted) == 3
+    assert adapted[0]["frame_id"] == "frame_5.50"
+    assert adapted[0]["timestamp"] == 5.5
+    assert adapted[0]["annotated_path"] == (
+        f"uploads/{JOB_ID}/annotated_frames/frame_5.50.jpg"
+    )
+    assert adapted[0]["path"] == adapted[0]["annotated_path"]
+    assert adapted[0]["raw_path"] is None
+    assert adapted[0]["faces"][0]["label_color"] == "#EF4444"
+    assert adapted[0]["faces"][0]["bbox"] == [420, 68, 560, 174]
+
+
+def test_merge_face_segments_into_segments(upload_dir, enriched):
+    paths = JobPaths(JOB_ID)
+    paths.job_dir.mkdir(parents=True, exist_ok=True)
+
+    enriched_path = paths.segments_enriched_json
+    face_path = paths.face_segments_json
+    _write_json(enriched_path, enriched)
+    _write_json(face_path, MOCK_FACE_SEGMENTS)
+
+    merged = merge_face_segments_into_segments(
+        enriched_path,
+        face_path,
+        job_id=JOB_ID,
+        save=False,
+    )
+
+    candidate = merged["segments"][2]
+    non_candidate = merged["segments"][0]
+
+    assert non_candidate["frames"] == []
+    assert non_candidate["persons"]["face_status"] == "pending"
+    assert len(candidate["frames"]) == 3
+    assert candidate["start"] <= candidate["frames"][0]["timestamp"] <= candidate["end"]
+    assert all(frame["selected"] is True for frame in candidate["frames"])
+    assert candidate["frames"][0]["annotated_path"].startswith(f"uploads/{JOB_ID}/")
+    assert candidate["persons"]["visible_person_ids"] == ["person_001"]
+    assert candidate["persons"]["face_status"] == "completed"
+
+
+def test_merge_face_segments_respects_max_frames(upload_dir, enriched):
+    paths = JobPaths(JOB_ID)
+    paths.job_dir.mkdir(parents=True, exist_ok=True)
+
+    many_samples = {
+        **MOCK_FACE_SEGMENTS,
+        "samples": [
+            {
+                "timestamp": 5.0 + index * 0.2,
+                "path": f"annotated_frames/frame_{5.0 + index * 0.2:.2f}.jpg",
+                "visible_person_ids": ["person_001"],
+                "faces": [
+                    {
+                        "person_id": "person_001",
+                        "color": "#EF4444",
+                        "confidence": 0.9,
+                        "bbox": {"x": 0.2, "y": 0.06, "w": 0.07, "h": 0.1},
+                    }
+                ],
+            }
+            for index in range(10)
+        ],
+    }
+
+    enriched_path = paths.segments_enriched_json
+    face_path = paths.face_segments_json
+    _write_json(enriched_path, enriched)
+    _write_json(face_path, many_samples)
+
+    merged = merge_face_segments_into_segments(
+        enriched_path,
+        face_path,
+        job_id=JOB_ID,
+        max_frames_per_segment=3,
+        save=False,
+    )
+
+    assert len(merged["segments"][2]["frames"]) == 3
+
+
+def test_merge_face_segments_missing_when_no_matching_samples(upload_dir, enriched):
+    paths = JobPaths(JOB_ID)
+    paths.job_dir.mkdir(parents=True, exist_ok=True)
+
+    out_of_range = {
+        **MOCK_FACE_SEGMENTS,
+        "samples": [
+            {
+                "timestamp": 20.0,
+                "path": "annotated_frames/frame_20.00.jpg",
+                "visible_person_ids": ["person_001"],
+                "faces": [
+                    {
+                        "person_id": "person_001",
+                        "color": "#EF4444",
+                        "confidence": 0.9,
+                        "bbox": {"x": 0.2, "y": 0.06, "w": 0.07, "h": 0.1},
+                    }
+                ],
+            }
+        ],
+    }
+
+    enriched_path = paths.segments_enriched_json
+    face_path = paths.face_segments_json
+    _write_json(enriched_path, enriched)
+    _write_json(face_path, out_of_range)
+
+    merged = merge_face_segments_into_segments(
+        enriched_path,
+        face_path,
+        job_id=JOB_ID,
+        save=False,
+    )
+
+    candidate = merged["segments"][2]
+    assert candidate["frames"] == []
+    assert candidate["persons"]["face_status"] == "missing"
+
+
+def test_merge_face_segments_missing_file_is_noop(upload_dir, enriched):
+    paths = JobPaths(JOB_ID)
+    paths.job_dir.mkdir(parents=True, exist_ok=True)
+
+    enriched_path = paths.segments_enriched_json
+    _write_json(enriched_path, enriched)
+
+    merged = merge_face_segments_into_segments(
+        enriched_path,
+        paths.face_segments_json,
+        job_id=JOB_ID,
+        save=False,
+    )
+
+    assert merged["segments"][2]["persons"]["face_status"] == "pending"
+    assert merged["segments"][2]["frames"] == []
+
+
+def test_try_merge_face_segments_for_job(upload_dir, enriched):
+    paths = JobPaths(JOB_ID)
+    paths.job_dir.mkdir(parents=True, exist_ok=True)
+
+    _write_json(paths.segments_enriched_json, enriched)
+    assert try_merge_face_segments_for_job(JOB_ID) is False
+
+    _write_json(paths.face_segments_json, MOCK_FACE_SEGMENTS)
+    assert try_merge_face_segments_for_job(JOB_ID) is True
+
+    merged = read_json(paths.segments_enriched_json)
+    assert merged["segments"][2]["persons"]["face_status"] == "completed"

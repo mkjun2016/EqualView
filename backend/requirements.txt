@@ -5,3 +5,7 @@ faster-whisper
 celery
 redis
 imageio-ffmpeg
+insightface
+onnxruntime
+opencv-python-headless
+numpy

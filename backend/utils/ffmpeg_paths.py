@@ -2,6 +2,7 @@ import os
 import re
 import shutil
 from functools import lru_cache
+from pathlib import Path
 from typing import Any
 
 
@@ -82,7 +83,7 @@ def has_audio_in_probe(stderr: str) -> bool:
     return bool(re.search(r"^\s*Stream .* Audio:", stderr, re.MULTILINE))
 
 
-_VIDEO_SIZE_RE = re.compile(r"Video:.*?(\d+)x(\d+)")
+_VIDEO_SIZE_RE = re.compile(r"Video:.*?, (\d+)x(\d+)")
 _FPS_RE = re.compile(r"(\d+(?:\.\d+)?)\s*fps")
 _TBR_RE = re.compile(r"(\d+(?:\.\d+)?)\s*tbr")
 

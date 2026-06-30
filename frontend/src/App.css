@@ -362,8 +362,9 @@ input {
 /* Watching stage */
 
 .watching-page {
-	justify-content: center;
+	justify-content: flex-start;
 	padding: 58px 32px 36px;
+	overflow-y: auto;
 }
 
 .result-video-shell {
@@ -448,6 +449,99 @@ input {
 	justify-content: center;
 
 	gap: 8px;
+}
+
+.frame-preview-section {
+	width: min(88vw, 1320px);
+	margin-top: 28px;
+}
+
+.frame-preview-header {
+	margin-bottom: 16px;
+	text-align: center;
+}
+
+.frame-preview-title {
+	margin: 0;
+	font-size: 22px;
+	font-weight: 700;
+	color: #1f2937;
+}
+
+.frame-preview-subtitle {
+	margin: 8px 0 0;
+	color: #7c8293;
+	font-size: 14px;
+	font-weight: 500;
+}
+
+.frame-preview-empty {
+	margin-top: 24px;
+}
+
+.frame-preview-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+	gap: 16px;
+}
+
+.frame-preview-card {
+	overflow: hidden;
+	border-radius: 16px;
+	border: 1px solid rgba(109, 93, 252, 0.12);
+	background: rgba(255, 255, 255, 0.82);
+	box-shadow:
+		0 12px 30px rgba(15, 23, 42, 0.08),
+		inset 0 1px 0 rgba(255, 255, 255, 0.9);
+}
+
+.frame-preview-image-wrap {
+	aspect-ratio: 9 / 16;
+	background: #111827;
+}
+
+.frame-preview-image {
+	width: 100%;
+	height: 100%;
+	object-fit: contain;
+	display: block;
+	background: #111827;
+}
+
+.frame-preview-placeholder {
+	width: 100%;
+	height: 100%;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	color: #9ca3af;
+	font-size: 14px;
+}
+
+.frame-preview-meta {
+	padding: 12px 14px 14px;
+}
+
+.frame-preview-time {
+	margin: 0;
+	font-size: 15px;
+	font-weight: 700;
+	color: #111827;
+}
+
+.frame-preview-segment {
+	margin: 4px 0 0;
+	font-size: 13px;
+	color: #6d5dfc;
+	font-weight: 600;
+}
+
+.frame-preview-persons {
+	margin: 6px 0 0;
+	font-size: 12px;
+	line-height: 1.45;
+	color: #6b7280;
+	word-break: break-word;
 }
 
 .record-button {
