@@ -2,6 +2,8 @@ import os
 import re
 import shutil
 from functools import lru_cache
+from pathlib import Path
+from typing import Any
 
 
 class FFmpegNotFoundError(RuntimeError):
@@ -56,6 +58,8 @@ def subprocess_run(command):
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
+        encoding="utf-8",
+        errors="replace",
     )
 
 
@@ -77,3 +81,43 @@ def parse_duration(stderr: str) -> float:
 
 def has_audio_in_probe(stderr: str) -> bool:
     return bool(re.search(r"^\s*Stream .* Audio:", stderr, re.MULTILINE))
+
+
+_VIDEO_SIZE_RE = re.compile(r"Video:.*?, (\d+)x(\d+)")
+_FPS_RE = re.compile(r"(\d+(?:\.\d+)?)\s*fps")
+_TBR_RE = re.compile(r"(\d+(?:\.\d+)?)\s*tbr")
+
+
+def parse_video_metadata(stderr: str, duration: float | None = None) -> dict[str, Any]:
+    width = None
+    height = None
+    fps = None
+
+    size_match = _VIDEO_SIZE_RE.search(stderr)
+    if size_match:
+        width = int(size_match.group(1))
+        height = int(size_match.group(2))
+
+    fps_match = _FPS_RE.search(stderr)
+    if fps_match:
+        fps = round(float(fps_match.group(1)), 3)
+    else:
+        tbr_match = _TBR_RE.search(stderr)
+        if tbr_match:
+            fps = round(float(tbr_match.group(1)), 3)
+
+    result: dict[str, Any] = {
+        "fps": fps,
+        "width": width,
+        "height": height,
+    }
+    if duration is not None:
+        result["duration"] = round(duration, 2)
+    return result
+
+
+def get_video_metadata(file_path: Path) -> dict[str, Any]:
+    stderr = probe_media(file_path)
+    duration = parse_duration(stderr)
+    metadata = parse_video_metadata(stderr, duration=duration)
+    return metadata

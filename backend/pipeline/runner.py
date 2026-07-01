@@ -7,7 +7,13 @@ from pipeline.audio_extractor import (
     get_media_duration,
     has_audio_stream,
 )
+from pipeline.segment_enricher import (
+    build_segments_enriched,
+    save_segments_enriched,
+    try_merge_face_segments_for_job,
+)
 from pipeline.transcriber import build_segments_from_words, transcribe_audio
+from utils.ffmpeg_paths import get_video_metadata
 from utils.json_io import atomic_write_json
 from utils.paths import JobPaths
 
@@ -50,8 +56,10 @@ def run_analysis(job_id: str, store: JobStore) -> dict:
     if audio_exists:
         script_result = transcribe_audio(audio_path)
         words = script_result["words"]
+        language = script_result.get("language")
     else:
         words = "audio doesn't exist"
+        language = None
 
     store.update(
         job_id,
@@ -62,6 +70,17 @@ def run_analysis(job_id: str, store: JobStore) -> dict:
     segments = build_segments_from_words(words, video_duration, audio_exists)
 
     atomic_write_json(segments_path, {"segments": segments})
+
+    video_metadata = get_video_metadata(video_path)
+    enriched = build_segments_enriched(
+        job_id=job_id,
+        raw_segments=segments,
+        video_path=video_path,
+        video_metadata=video_metadata,
+        language=language,
+    )
+    save_segments_enriched(job_id, enriched)
+    try_merge_face_segments_for_job(job_id)
 
     store.update(
         job_id,
@@ -76,4 +95,5 @@ def run_analysis(job_id: str, store: JobStore) -> dict:
         "duration": round(video_duration, 2),
         "has_audio": audio_exists,
         "segment_count": len(segments),
+        "narration_candidate_count": enriched["summary"]["narration_candidate_count"],
     }

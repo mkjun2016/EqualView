@@ -36,6 +36,7 @@ def process_video_job(job_id: str) -> None:
         )
         raise
 
+
 @celery_app.task(name="tasks.process_face_job")
 def process_face_job(job_id: str) -> None:
     started_at = time.monotonic()
@@ -51,9 +52,11 @@ def process_face_job(job_id: str) -> None:
             face_error=None,
         )
 
-        runner = importlib.import_module("pipeline.face_runner")
+        face_runner = importlib.import_module("pipeline.face_runner")
+        result = face_runner.run_face_analysis(job_id)
 
-        result = runner.run_face_analysis(job_id)
+        segment_enricher = importlib.import_module("pipeline.segment_enricher")
+        segment_enricher.try_merge_face_segments_for_job(job_id)
 
         job_store.update(
             job_id,

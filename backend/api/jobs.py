@@ -43,15 +43,8 @@ async def create_job(file: UploadFile = File(...)):
         },
     )
 
-    celery_app.send_task(
-        "tasks.process_video_job",
-        args=[job_id],
-    )
-
-    celery_app.send_task(
-        "tasks.process_face_job",
-        args=[job_id],
-    )
+    celery_app.send_task("tasks.process_video_job", args=[job_id])
+    celery_app.send_task("tasks.process_face_job", args=[job_id])
 
     return {"job_id": job_id, "status": "PENDING"}
 
@@ -63,6 +56,52 @@ def get_job(job_id: str):
         raise HTTPException(status_code=404, detail="Job not found")
 
     return job_data
+
+
+@router.get("/api/jobs/{job_id}/segments/enriched")
+def get_job_segments_enriched(job_id: str):
+    if not job_store.exists(job_id):
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    job_data = job_store.get(job_id)
+    if job_data is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    if job_data["status"] == "FAILED":
+        raise HTTPException(
+            status_code=409,
+            detail=job_data.get("error") or "Job failed",
+        )
+
+    if job_data["status"] != "COMPLETED":
+        raise HTTPException(
+            status_code=409,
+            detail=f"Job is not completed yet (status: {job_data['status']})",
+        )
+
+    paths = JobPaths(job_id)
+    if not paths.segments_enriched_json.exists():
+        raise HTTPException(status_code=404, detail="Enriched segments file not found")
+
+    return read_json(paths.segments_enriched_json)
+
+
+@router.get("/api/jobs/{job_id}/frames/{filename}")
+def get_annotated_frame(job_id: str, filename: str):
+    if not job_store.exists(job_id):
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    safe_name = Path(filename).name
+    if safe_name != filename:
+        raise HTTPException(status_code=400, detail="Invalid frame filename")
+
+    paths = JobPaths(job_id)
+    frame_path = paths.annotated_frames_dir / safe_name
+
+    if not frame_path.exists():
+        raise HTTPException(status_code=404, detail="Frame not found")
+
+    return FileResponse(frame_path, media_type="image/jpeg")
 
 
 @router.get("/api/jobs/{job_id}/segments")

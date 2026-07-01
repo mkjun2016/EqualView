@@ -1,4 +1,4 @@
-.PHONY: help setup up down logs redis api worker frontend
+.PHONY: help setup up down logs redis api worker frontend test
 
 help:
 	@echo "EqualView local development"
@@ -14,6 +14,7 @@ help:
 	@echo "  make api       Start FastAPI (port 8000)"
 	@echo "  make worker    Start Celery worker on host"
 	@echo "  make frontend  Start Vite dev server (port 5173)"
+	@echo "  make test      Run backend pytest suite"
 	@echo ""
 	@echo "Full UI: make up + make frontend"
 
@@ -40,3 +41,6 @@ worker:
 
 frontend:
 	cd frontend && npm run dev
+
+test:
+	cd backend && (test -x venv/bin/pytest && venv/bin/pytest tests/ -q || pytest tests/ -q)

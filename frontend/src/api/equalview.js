@@ -35,6 +35,42 @@ export async function getJobSegments(jobId) {
   return res.json()
 }
 
+export async function getJobSegmentsEnriched(jobId) {
+  const res = await fetch(`${BASE}/jobs/${jobId}/segments/enriched`)
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}))
+    throw new Error(data.detail || 'Failed to fetch enriched segments')
+  }
+  return res.json()
+}
+
+export function getAnnotatedFrameUrl(jobId, frame) {
+  const path = frame?.annotated_path || frame?.path || ''
+  const filename = path.split('/').pop()
+  if (!jobId || !filename) return null
+  return `${BASE}/jobs/${jobId}/frames/${encodeURIComponent(filename)}`
+}
+
+export function collectPreviewFrames(enrichedResult) {
+  const previews = []
+
+  for (const segment of enrichedResult?.segments ?? []) {
+    for (const frame of segment.frames ?? []) {
+      if (!frame?.annotated_path && !frame?.path) continue
+
+      previews.push({
+        ...frame,
+        segmentId: segment.segment_id,
+        personIds: (frame.faces ?? [])
+          .map((face) => face.person_id)
+          .filter(Boolean),
+      })
+    }
+  }
+
+  return previews.sort((a, b) => a.timestamp - b.timestamp)
+}
+
 export async function sendVoiceCommand(audioBlob) {
   const formData = new FormData()
   formData.append('audio', audioBlob, 'voice.webm')
@@ -46,6 +82,49 @@ export async function sendVoiceCommand(audioBlob) {
 
   if (!res.ok) throw new Error('Voice command failed')
   return res.json()
+}
+
+export const JOB_POLL_DELAYS_MS = [2000, 3000, 5000]
+
+export function createJobPollSnapshot(job) {
+  return JSON.stringify({
+    status: job?.status ?? null,
+    progress: job?.progress ?? 0,
+    current_step: job?.current_step ?? null,
+    face_status: job?.face_status ?? null,
+    face_progress: job?.face_progress ?? 0,
+    narration_status: job?.narration_status ?? null,
+    combine_status: job?.combine_status ?? null,
+  })
+}
+
+export function nextJobPollDelayIndex(currentIndex, previousSnapshot, nextSnapshot) {
+  if (previousSnapshot === null || previousSnapshot !== nextSnapshot) {
+    return 0
+  }
+  return Math.min(currentIndex + 1, JOB_POLL_DELAYS_MS.length - 1)
+}
+
+export function getJobPollDelayMs(delayIndex) {
+  return JOB_POLL_DELAYS_MS[Math.min(delayIndex, JOB_POLL_DELAYS_MS.length - 1)]
+}
+
+export function formatJobStatusMessage(job) {
+  const parts = []
+
+  if (job?.current_step) {
+    parts.push(`${job.current_step} (${job.progress ?? 0}%)`)
+  }
+
+  if (job?.face_current_step && job?.face_status === 'PROCESSING') {
+    parts.push(`${job.face_current_step} (${job.face_progress ?? 0}%)`)
+  }
+
+  if (job?.face_status === 'FAILED' && job?.face_error) {
+    parts.push(`Face: ${job.face_error}`)
+  }
+
+  return parts.join(' · ')
 }
 
 const PROCESSING_TITLES = [
@@ -64,67 +143,16 @@ function statusToStepState(status) {
 
 export function deriveProcessingSteps(job) {
   return [
-    {
-      title: PROCESSING_TITLES[0],
-      state: statusToStepState(job.status),
-    },
-    {
-      title: PROCESSING_TITLES[1],
-      state: statusToStepState(job.face_status),
-    },
-    {
-      title: PROCESSING_TITLES[2],
-      state: statusToStepState(job.narration_status),
-    },
-    {
-      title: PROCESSING_TITLES[3],
-      state: statusToStepState(job.combine_status),
-    },
+    { title: PROCESSING_TITLES[0], state: statusToStepState(job.status) },
+    { title: PROCESSING_TITLES[1], state: statusToStepState(job.face_status) },
+    { title: PROCESSING_TITLES[2], state: statusToStepState(job.narration_status) },
+    { title: PROCESSING_TITLES[3], state: statusToStepState(job.combine_status) },
   ]
 }
 
 export function getProcessingProgress(steps) {
-  const completedCount = steps.filter(
-    (step) => step.state === 'completed'
-  ).length
-
+  const completedCount = steps.filter((step) => step.state === 'completed').length
   return completedCount * (100 / PROCESSING_TITLES.length)
-}
-
-export function deriveProcessingStepsFromProgress(progress, status) {
-  const titles = [
-    'Extracting Audio and Frames',
-    'Generating Narration',
-    'Combining Audio',
-  ]
-
-  if (status === 'COMPLETED') {
-    return titles.map((title) => ({ title, state: 'completed' }))
-  }
-
-  if (status === 'FAILED') {
-    return titles.map((title, index) => ({
-      title,
-      state: index === 0 ? 'failed' : 'waiting',
-    }))
-  }
-
-  const thresholds = [
-    { start: 0, done: 30 },
-    { start: 30, done: 60 },
-    { start: 60, done: 80 },
-    { start: 80, done: 100 },
-  ]
-
-  return titles.map((title, index) => {
-    const { start, done } = thresholds[index]
-    let state = 'waiting'
-
-    if (progress >= done) state = 'completed'
-    else if (progress >= start) state = 'in-progress'
-
-    return { title, state }
-  })
 }
 
 export const INITIAL_PROCESSING_STEPS = [
