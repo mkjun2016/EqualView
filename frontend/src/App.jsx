@@ -3,6 +3,7 @@ import "./App.css";
 import {
 	createJob,
 	deriveProcessingSteps,
+	getDownloadUrl,
 	getJobSegments,
 	getJobStatus,
 	getProcessingProgress,
@@ -12,6 +13,7 @@ import {
 import {
 	PlusIcon,
 	AudioIcon,
+	SceneIcon,
 	NarrationIcon,
 	OutputIcon,
 	MicIcon,
@@ -20,6 +22,10 @@ import {
 } from "./icons/Icons";
 
 const POLL_INTERVAL_MS = 2000;
+
+function formatSeconds(value) {
+	return typeof value === "number" ? `${value.toFixed(1)}s` : "-";
+}
 
 function ProcessingStep({ icon, title, state }) {
 	return (
@@ -42,6 +48,7 @@ function ProcessingStep({ icon, title, state }) {
 
 const PROCESSING_STEP_ICONS = [
 	<AudioIcon />,
+	<SceneIcon />,
 	<NarrationIcon />,
 	<OutputIcon />,
 ];
@@ -49,13 +56,13 @@ const PROCESSING_STEP_ICONS = [
 function App() {
 	const [phase, setPhase] = useState("upload");
 	const [videoFile, setVideoFile] = useState(null);
-	const [videoURL, setVideoURL] = useState("");
 	const [thumbnailURL, setThumbnailURL] = useState("");
 	const [jobId, setJobId] = useState(null);
 	const [segments, setSegments] = useState([]);
 	const [jobProgress, setJobProgress] = useState(0);
 	const [isListening, setIsListening] = useState(false);
 	const [status, setStatus] = useState("");
+	const [stepTimings, setStepTimings] = useState(null);
 
 	const videoRef = useRef(null);
 	const mediaRecorderRef = useRef(null);
@@ -69,14 +76,12 @@ function App() {
 
 		if (!file) return;
 
-		const url = URL.createObjectURL(file);
-
 		setVideoFile(file);
-		setVideoURL(url);
 		setJobId(null);
 		setSegments([]);
 		setJobProgress(0);
 		setProcessingSteps(INITIAL_PROCESSING_STEPS);
+		setStepTimings(null);
 		setPhase("processing");
 		setStatus("Uploading video...");
 
@@ -291,19 +296,15 @@ function App() {
 	function goHome() {
 		stopListening();
 
-		if (videoURL) {
-			URL.revokeObjectURL(videoURL);
-		}
-
 		setPhase("upload");
 		setVideoFile(null);
-		setVideoURL("");
 		setThumbnailURL("");
 		setJobId(null);
 		setSegments([]);
 		setJobProgress(0);
 		setStatus("");
 		setProcessingSteps(INITIAL_PROCESSING_STEPS);
+		setStepTimings(null);
 	}
 
 	useEffect(() => {
@@ -335,13 +336,30 @@ function App() {
 					if (cancelled) return;
 
 					setSegments(data.segments ?? []);
+					setStepTimings({
+						dialogue: job.dialogue_seconds,
+						face: job.face_seconds,
+						narration: job.narration_seconds,
+						combine: job.combine_seconds,
+					});
 					setPhase("watching");
 					setStatus("");
 					return;
 				}
 
-				if (job.status === "FAILED" || job.face_status === "FAILED") {
-					setStatus(job.error || job.face_error || "Processing failed.");
+				if (
+					job.status === "FAILED" ||
+					job.face_status === "FAILED" ||
+					job.narration_status === "FAILED" ||
+					job.combine_status === "FAILED"
+				) {
+					setStatus(
+						job.error ||
+							job.face_error ||
+							job.narration_error ||
+							job.combine_error ||
+							"Processing failed."
+					);
 				}
 			} catch (error) {
 				if (!cancelled) {
@@ -376,14 +394,6 @@ function App() {
 			window.removeEventListener("keydown", handleKeyDown);
 		};
 	}, [isListening, videoFile, phase]);
-
-	useEffect(() => {
-		return () => {
-			if (videoURL) {
-				URL.revokeObjectURL(videoURL);
-			}
-		};
-	}, [videoURL]);
 
 	const speechCount = segments.filter((segment) => segment.speech === true).length;
 	const silenceCount = segments.filter((segment) => segment.speech === false).length;
@@ -435,6 +445,10 @@ function App() {
 						</section>
 					</div>
 
+					<div className="progress-header">
+						<span className="progress-percent">{Math.round(jobProgress)}%</span>
+					</div>
+
 					<div className="progress-track">
 						<div
 							className="progress-fill"
@@ -464,19 +478,19 @@ function App() {
 							<video
 								ref={videoRef}
 								className="video-player"
-								src={videoURL}
+								src={getDownloadUrl(jobId)}
 								controls
 							/>
 						</section>
 
-						<button
+						<a
 							className="download-button"
-							type="button"
-							onClick={downloadSegments}
-							aria-label="Download segments JSON"
+							href={getDownloadUrl(jobId)}
+							download={`equalview_${jobId}.mp4`}
+							aria-label="Download result video"
 						>
 							<DownloadIcon />
-						</button>
+						</a>
 					</section>
 
 					<section className="watch-controls">
@@ -493,7 +507,23 @@ function App() {
 						</button>
 
 						<p className="hint">Press Q or click the button</p>
+						<button
+							type="button"
+							className="hint json-download-link"
+							onClick={downloadSegments}
+						>
+							분석 데이터(JSON) 다운로드
+						</button>
 						<p className="status">{status}</p>
+
+						{stepTimings && (
+							<p className="debug-timings">
+								디버그 — 대사 추출 {formatSeconds(stepTimings.dialogue)} · 얼굴 인식{" "}
+								{formatSeconds(stepTimings.face)} · 화면해설 생성{" "}
+								{formatSeconds(stepTimings.narration)} · 음성 합성{" "}
+								{formatSeconds(stepTimings.combine)}
+							</p>
+						)}
 					</section>
 				</main>
 			)}

@@ -1,3 +1,5 @@
+import time
+
 from services.job_store import JobStore
 from pipeline.audio_extractor import (
     create_silent_wav,
@@ -11,6 +13,8 @@ from utils.paths import JobPaths
 
 
 def run_analysis(job_id: str, store: JobStore) -> dict:
+    started_at = time.monotonic()
+
     paths = JobPaths(job_id)
     video_path = paths.find_input_video()
     audio_path = paths.audio_wav
@@ -65,6 +69,7 @@ def run_analysis(job_id: str, store: JobStore) -> dict:
         progress=100,
         current_step="분석 완료",
         error=None,
+        dialogue_seconds=round(time.monotonic() - started_at, 2),
     )
 
     return {

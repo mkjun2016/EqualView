@@ -26,7 +26,7 @@ def process_video_job(job_id: str) -> None:
         _ensure_backend_path()
         runner = importlib.import_module("pipeline.runner")
         runner.run_analysis(job_id, job_store)
-        _run_mock_final_steps_if_ready(job_id)
+        _run_post_processing_if_ready(job_id)
     except Exception as exc:
         job_store.update(
             job_id,
@@ -38,6 +38,8 @@ def process_video_job(job_id: str) -> None:
 
 @celery_app.task(name="tasks.process_face_job")
 def process_face_job(job_id: str) -> None:
+    started_at = time.monotonic()
+
     try:
         _ensure_backend_path()
 
@@ -60,8 +62,9 @@ def process_face_job(job_id: str) -> None:
             face_current_step="얼굴 분석 완료",
             face_error=None,
             face_result=result,
+            face_seconds=round(time.monotonic() - started_at, 2),
         )
-        _run_mock_final_steps_if_ready(job_id)
+        _run_post_processing_if_ready(job_id)
 
     except Exception as exc:
         job_store.update(
@@ -73,7 +76,7 @@ def process_face_job(job_id: str) -> None:
         raise
 
 
-def _run_mock_final_steps_if_ready(job_id: str) -> None:
+def _run_post_processing_if_ready(job_id: str) -> None:
     job_data = job_store.get(job_id)
     if job_data is None:
         return
@@ -89,20 +92,53 @@ def _run_mock_final_steps_if_ready(job_id: str) -> None:
     job_store.update(
         job_id,
         narration_status="PROCESSING",
-        current_step="Generating narration",
+        current_step="화면해설 생성 중",
     )
-    time.sleep(0.5)
+
+    narration_started_at = time.monotonic()
+
+    try:
+        narrator = importlib.import_module("pipeline.narrator")
+        narration_result = narrator.run_narration(job_id)
+    except Exception as exc:
+        job_store.update(
+            job_id,
+            narration_status="FAILED",
+            narration_error=str(exc),
+            current_step="화면해설 생성 실패",
+        )
+        return
 
     job_store.update(
         job_id,
         narration_status="COMPLETED",
+        narration_result=narration_result,
+        narration_seconds=round(time.monotonic() - narration_started_at, 2),
         combine_status="PROCESSING",
-        current_step="Combining audio",
+        current_step="화면해설 음성 합성 중",
     )
-    time.sleep(0.5)
+
+    combine_started_at = time.monotonic()
+
+    try:
+        tts = importlib.import_module("pipeline.tts")
+        tts_result = tts.run_tts(job_id)
+
+        synthesizer = importlib.import_module("pipeline.synthesizer")
+        synthesis_result = synthesizer.run_synthesis(job_id)
+    except Exception as exc:
+        job_store.update(
+            job_id,
+            combine_status="FAILED",
+            combine_error=str(exc),
+            current_step="최종 영상 합성 실패",
+        )
+        return
 
     job_store.update(
         job_id,
         combine_status="COMPLETED",
-        current_step="Processing complete",
+        combine_result={**tts_result, **synthesis_result},
+        combine_seconds=round(time.monotonic() - combine_started_at, 2),
+        current_step="처리 완료",
     )

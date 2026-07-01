@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi.responses import FileResponse
 import uuid
 
 from config import UPLOAD_DIR
@@ -90,3 +91,26 @@ def get_job_segments(job_id: str):
         raise HTTPException(status_code=404, detail="Segments file not found")
 
     return read_json(paths.segments_json)
+
+
+@router.get("/api/jobs/{job_id}/download")
+def download_job_output(job_id: str):
+    job_data = job_store.get(job_id)
+    if job_data is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    if job_data.get("combine_status") != "COMPLETED":
+        raise HTTPException(
+            status_code=409,
+            detail=f"Output video is not ready yet (combine_status: {job_data.get('combine_status')})",
+        )
+
+    paths = JobPaths(job_id)
+    if not paths.output_video.exists():
+        raise HTTPException(status_code=404, detail="Output video not found")
+
+    return FileResponse(
+        path=paths.output_video,
+        media_type="video/mp4",
+        filename=f"equalview_{job_id}.mp4",
+    )

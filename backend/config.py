@@ -1,7 +1,11 @@
 import os
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 BASE_DIR = Path(__file__).resolve().parent
+load_dotenv(BASE_DIR / ".env")
+
 UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", str(BASE_DIR / "uploads")))
 
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
@@ -56,3 +60,15 @@ FACE_NEW_ID_MIN_AREA_RATIO = float(
 FACE_NEW_ID_EDGE_MARGIN_RATIO = float(
     os.getenv("FACE_NEW_ID_EDGE_MARGIN_RATIO", "0")
 )
+
+# Gemini 화면해설 생성
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+
+# narration_safe 구간 하나당 Gemini에 보낼 프레임 수
+NARRATION_FRAMES_PER_SEGMENT = int(
+    os.getenv("NARRATION_FRAMES_PER_SEGMENT", "5")
+)
+
+# 화면해설 음성 합성 (무료, API 키 불필요)
+TTS_VOICE = os.getenv("TTS_VOICE", "ko-KR-SunHiNeural")

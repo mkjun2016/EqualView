@@ -22,6 +22,10 @@ export async function getJobStatus(jobId) {
   return res.json()
 }
 
+export function getDownloadUrl(jobId) {
+  return `${BASE}/jobs/${jobId}/download`
+}
+
 export async function getJobSegments(jobId) {
   const res = await fetch(`${BASE}/jobs/${jobId}/segments`)
   if (!res.ok) {
@@ -45,7 +49,8 @@ export async function sendVoiceCommand(audioBlob) {
 }
 
 const PROCESSING_TITLES = [
-  'Extracting Audio and Frames',
+  'Extracting Dialogue',
+  'Detecting Faces',
   'Generating Narration',
   'Combining Audio',
 ]
@@ -58,27 +63,21 @@ function statusToStepState(status) {
 }
 
 export function deriveProcessingSteps(job) {
-  const extractionFailed =
-    job.status === 'FAILED' || job.face_status === 'FAILED'
-  const extractionCompleted =
-    job.status === 'COMPLETED' && job.face_status === 'COMPLETED'
-  const extractionState = extractionFailed
-    ? 'failed'
-    : extractionCompleted
-      ? 'completed'
-      : 'in-progress'
-
   return [
     {
       title: PROCESSING_TITLES[0],
-      state: extractionState,
+      state: statusToStepState(job.status),
     },
     {
       title: PROCESSING_TITLES[1],
-      state: statusToStepState(job.narration_status),
+      state: statusToStepState(job.face_status),
     },
     {
       title: PROCESSING_TITLES[2],
+      state: statusToStepState(job.narration_status),
+    },
+    {
+      title: PROCESSING_TITLES[3],
       state: statusToStepState(job.combine_status),
     },
   ]
@@ -129,7 +128,8 @@ export function deriveProcessingStepsFromProgress(progress, status) {
 }
 
 export const INITIAL_PROCESSING_STEPS = [
-  { title: 'Extracting Audio and Frames', state: 'in-progress' },
+  { title: 'Extracting Dialogue', state: 'in-progress' },
+  { title: 'Detecting Faces', state: 'in-progress' },
   { title: 'Generating Narration', state: 'waiting' },
   { title: 'Combining Audio', state: 'waiting' },
 ]

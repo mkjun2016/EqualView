@@ -28,6 +28,14 @@ class JobPaths:
     def annotated_frames_dir(self) -> Path:
         return self.job_dir / "annotated_frames"
 
+    @property
+    def narration_audio_dir(self) -> Path:
+        return self.job_dir / "narration_audio"
+
+    @property
+    def output_video(self) -> Path:
+        return self.job_dir / "output.mp4"
+
     def input_path(self, extension: str) -> Path:
         ext = extension if extension.startswith(".") else f".{extension}"
         return self.job_dir / f"input{ext}"

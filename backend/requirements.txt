@@ -7,5 +7,8 @@ redis
 imageio-ffmpeg
 insightface
 onnxruntime
-opencv-python
+opencv-python-headless
 numpy
+google-genai
+python-dotenv
+edge-tts
