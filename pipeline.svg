@@ -1,0 +1,135 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 1080" width="900" height="1080" font-family="'Helvetica Neue', Arial, sans-serif">
+  <!-- Background -->
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#f8f7ff;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#eef1f7;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="purpleGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#6d5dfc;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#8b5cf6;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="greenGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#10b981;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#059669;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="blueGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#3b82f6;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#2563eb;stop-opacity:1" />
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="130%">
+      <feDropShadow dx="0" dy="4" stdDeviation="8" flood-color="rgba(15,23,42,0.10)" />
+    </filter>
+    <filter id="shadowSm" x="-10%" y="-10%" width="120%" height="130%">
+      <feDropShadow dx="0" dy="2" stdDeviation="4" flood-color="rgba(15,23,42,0.08)" />
+    </filter>
+    <marker id="arrow" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#6d5dfc" />
+    </marker>
+    <marker id="arrowGray" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#94a3b8" />
+    </marker>
+    <marker id="arrowGreen" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#10b981" />
+    </marker>
+  </defs>
+
+  <rect width="900" height="1080" fill="url(#bgGrad)" rx="0" />
+
+  <!-- Title -->
+  <text x="450" y="52" text-anchor="middle" font-size="28" font-weight="700" fill="#111827" letter-spacing="-0.8">EqualView Pipeline</text>
+  <text x="450" y="76" text-anchor="middle" font-size="14" fill="#6b7280">시각장애인을 위한 AI 화면해설 자동생성</text>
+
+  <!-- ── STEP 1: Upload ── -->
+  <rect x="300" y="102" width="300" height="70" rx="16" fill="url(#purpleGrad)" filter="url(#shadow)" />
+  <text x="450" y="131" text-anchor="middle" font-size="11" fill="rgba(255,255,255,0.75)" font-weight="600" letter-spacing="1.5">STEP 1</text>
+  <text x="450" y="153" text-anchor="middle" font-size="17" font-weight="700" fill="#fff">영상 업로드</text>
+
+  <!-- Arrow down from upload -->
+  <line x1="450" y1="172" x2="450" y2="210" stroke="#6d5dfc" stroke-width="2" marker-end="url(#arrow)" />
+
+  <!-- Fork lines -->
+  <line x1="450" y1="224" x2="216" y2="224" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="5,3" />
+  <line x1="450" y1="224" x2="684" y2="224" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="5,3" />
+  <line x1="216" y1="224" x2="216" y2="256" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arrowGray)" />
+  <line x1="684" y1="224" x2="684" y2="256" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arrowGray)" />
+  <text x="450" y="219" text-anchor="middle" font-size="11" fill="#94a3b8">병렬 처리</text>
+
+  <!-- ── STEP 2A: Whisper ── -->
+  <rect x="66" y="256" width="300" height="164" rx="16" fill="#fff" filter="url(#shadow)" stroke="rgba(109,93,252,0.15)" stroke-width="1" />
+  <rect x="66" y="256" width="300" height="44" rx="16" fill="url(#blueGrad)" />
+  <rect x="66" y="280" width="300" height="20" fill="url(#blueGrad)" />
+  <text x="216" y="275" text-anchor="middle" font-size="11" fill="rgba(255,255,255,0.75)" font-weight="600" letter-spacing="1.5">STEP 2A</text>
+  <text x="216" y="293" text-anchor="middle" font-size="15" font-weight="700" fill="#fff">Whisper 대사 추출</text>
+  <text x="96" y="326" font-size="12.5" fill="#374151">・오디오 추출 (WAV)</text>
+  <text x="96" y="346" font-size="12.5" fill="#374151">・faster-whisper 전사</text>
+  <text x="96" y="366" font-size="12.5" fill="#374151">・침묵 구간 감지 (≥ 0.7s gap)</text>
+  <text x="96" y="386" font-size="12.5" fill="#374151">・narration_safe 구간 마킹 (≥ 3s)</text>
+  <text x="96" y="406" font-size="12.5" fill="#6d5dfc" font-weight="600">→ segments.json</text>
+
+  <!-- ── STEP 2B: Face Detection ── -->
+  <rect x="534" y="256" width="300" height="164" rx="16" fill="#fff" filter="url(#shadow)" stroke="rgba(109,93,252,0.15)" stroke-width="1" />
+  <rect x="534" y="256" width="300" height="44" rx="16" fill="url(#blueGrad)" />
+  <rect x="534" y="280" width="300" height="20" fill="url(#blueGrad)" />
+  <text x="684" y="275" text-anchor="middle" font-size="11" fill="rgba(255,255,255,0.75)" font-weight="600" letter-spacing="1.5">STEP 2B</text>
+  <text x="684" y="293" text-anchor="middle" font-size="15" font-weight="700" fill="#fff">InsightFace 얼굴 인식</text>
+  <text x="564" y="326" font-size="12.5" fill="#374151">・0.51초 간격 프레임 추출</text>
+  <text x="564" y="346" font-size="12.5" fill="#374151">・얼굴 임베딩 → 인물 클러스터링</text>
+  <text x="564" y="366" font-size="12.5" fill="#374151">・person_001 / person_002 … 라벨</text>
+  <text x="564" y="386" font-size="12.5" fill="#374151">・bounding box annotated 프레임 저장</text>
+  <text x="564" y="406" font-size="12.5" fill="#6d5dfc" font-weight="600">→ face_segments.json</text>
+
+  <!-- Arrows joining down -->
+  <line x1="216" y1="420" x2="216" y2="462" stroke="#94a3b8" stroke-width="1.5" />
+  <line x1="684" y1="420" x2="684" y2="462" stroke="#94a3b8" stroke-width="1.5" />
+  <line x1="216" y1="462" x2="440" y2="462" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="5,3" />
+  <line x1="684" y1="462" x2="460" y2="462" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="5,3" />
+  <line x1="450" y1="462" x2="450" y2="496" stroke="#6d5dfc" stroke-width="2" marker-end="url(#arrow)" />
+  <text x="450" y="479" text-anchor="middle" font-size="11" fill="#94a3b8">양쪽 완료 대기</text>
+
+  <!-- ── STEP 3: Gemini Narration ── -->
+  <rect x="150" y="498" width="600" height="160" rx="16" fill="#fff" filter="url(#shadow)" stroke="rgba(109,93,252,0.15)" stroke-width="1" />
+  <rect x="150" y="498" width="600" height="44" rx="16" fill="url(#purpleGrad)" />
+  <rect x="150" y="522" width="600" height="20" fill="url(#purpleGrad)" />
+  <text x="450" y="517" text-anchor="middle" font-size="11" fill="rgba(255,255,255,0.75)" font-weight="600" letter-spacing="1.5">STEP 3</text>
+  <text x="450" y="536" text-anchor="middle" font-size="15" font-weight="700" fill="#fff">Gemini 2.5 Flash — 한국어 화면해설 생성</text>
+  <text x="180" y="569" font-size="12.5" fill="#374151">・narration_safe 구간마다 대표 프레임 5장 선택 (시간 균등 분포)</text>
+  <text x="180" y="589" font-size="12.5" fill="#374151">・이전 대사 전체 + 다음 대사 1줄 → 맥락 프롬프트 구성</text>
+  <text x="180" y="609" font-size="12.5" fill="#374151">・인물 라벨 (person_001 → '한 남자', '여성' 등 자연어 변환)</text>
+  <text x="180" y="629" font-size="12.5" fill="#374151">・구간 길이에 맞는 간결한 한국어 해설 한 문단 생성</text>
+  <text x="180" y="649" font-size="12.5" fill="#6d5dfc" font-weight="600">→ segments.json (narration 필드 추가)</text>
+
+  <!-- Arrow -->
+  <line x1="450" y1="658" x2="450" y2="694" stroke="#6d5dfc" stroke-width="2" marker-end="url(#arrow)" />
+
+  <!-- ── STEP 4: TTS ── -->
+  <rect x="150" y="696" width="600" height="120" rx="16" fill="#fff" filter="url(#shadow)" stroke="rgba(109,93,252,0.15)" stroke-width="1" />
+  <rect x="150" y="696" width="600" height="44" rx="16" fill="url(#purpleGrad)" />
+  <rect x="150" y="720" width="600" height="20" fill="url(#purpleGrad)" />
+  <text x="450" y="715" text-anchor="middle" font-size="11" fill="rgba(255,255,255,0.75)" font-weight="600" letter-spacing="1.5">STEP 4</text>
+  <text x="450" y="734" text-anchor="middle" font-size="15" font-weight="700" fill="#fff">edge-tts — 음성 합성</text>
+  <text x="180" y="767" font-size="12.5" fill="#374151">・ko-KR-SunHiNeural 음성 (무료, API 키 불필요)</text>
+  <text x="180" y="787" font-size="12.5" fill="#374151">・구간별 MP3 생성: narration_audio/seg_{start}.mp3</text>
+  <text x="180" y="807" font-size="12.5" fill="#6d5dfc" font-weight="600">→ narration_audio/*.mp3 + TTS 오디오 길이 측정</text>
+
+  <!-- Arrow -->
+  <line x1="450" y1="816" x2="450" y2="852" stroke="#6d5dfc" stroke-width="2" marker-end="url(#arrow)" />
+
+  <!-- ── STEP 5: Synthesis ── -->
+  <rect x="150" y="854" width="600" height="138" rx="16" fill="#fff" filter="url(#shadow)" stroke="rgba(109,93,252,0.15)" stroke-width="1" />
+  <rect x="150" y="854" width="600" height="44" rx="16" fill="url(#purpleGrad)" />
+  <rect x="150" y="878" width="600" height="20" fill="url(#purpleGrad)" />
+  <text x="450" y="873" text-anchor="middle" font-size="11" fill="rgba(255,255,255,0.75)" font-weight="600" letter-spacing="1.5">STEP 5</text>
+  <text x="450" y="892" text-anchor="middle" font-size="15" font-weight="700" fill="#fff">ffmpeg — 최종 영상 합성</text>
+  <text x="180" y="925" font-size="12.5" fill="#374151">・adelay 로 해설 음성을 정확한 타임스탬프에 위치</text>
+  <text x="180" y="945" font-size="12.5" fill="#374151">・atempo 로 TTS가 침묵 구간보다 길면 속도 조정 (최대 1.6×)</text>
+  <text x="180" y="965" font-size="12.5" fill="#374151">・amix normalize=0 으로 원본 오디오 + 해설 음성 믹싱</text>
+  <text x="180" y="985" font-size="12.5" fill="#6d5dfc" font-weight="600">→ output.mp4 (원본 화질 유지, 해설 음성 삽입)</text>
+
+  <!-- Arrow -->
+  <line x1="450" y1="992" x2="450" y2="1026" stroke="#10b981" stroke-width="2" marker-end="url(#arrowGreen)" />
+
+  <!-- ── DONE ── -->
+  <rect x="300" y="1028" width="300" height="36" rx="18" fill="url(#greenGrad)" filter="url(#shadowSm)" />
+  <text x="450" y="1051" text-anchor="middle" font-size="15" font-weight="700" fill="#fff">다운로드 완료 🎬</text>
+</svg>

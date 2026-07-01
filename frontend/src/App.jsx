@@ -570,6 +570,41 @@ function App() {
 						</a>
 					</section>
 
+					<section className="watch-controls">
+						<p className="hint">
+							Analysis complete: {speechCount} speech / {silenceCount} non-speech segments
+						</p>
+
+						<button
+							className={`record-button ${isListening ? "listening" : ""}`}
+							onClick={toggleListening}
+							aria-label={isListening ? "Stop listening" : "Start listening"}
+						>
+							<MicIcon />
+						</button>
+
+						<p className="hint">Press Q or click the button</p>
+
+						<button
+							type="button"
+							className="hint json-download-link"
+							onClick={downloadSegments}
+						>
+							분석 데이터(JSON) 다운로드
+						</button>
+
+						<p className="status">{status}</p>
+
+						{stepTimings && (
+							<p className="debug-timings">
+								디버그 — 대사 추출 {formatSeconds(stepTimings.dialogue)} · 얼굴 인식{" "}
+								{formatSeconds(stepTimings.face)} · 화면해설 생성{" "}
+								{formatSeconds(stepTimings.narration)} · 음성 합성{" "}
+								{formatSeconds(stepTimings.combine)}
+							</p>
+						)}
+					</section>
+
 					{previewFrames.length > 0 && (
 						<section className="frame-preview-section">
 							<div className="frame-preview-header">
@@ -590,39 +625,6 @@ function App() {
 							</div>
 						</section>
 					)}
-
-					<section className="watch-controls">
-						<p className="hint">
-							Analysis complete: {speechCount} speech / {silenceCount} non-speech segments
-						</p>
-
-						<button
-							className={`record-button ${isListening ? "listening" : ""}`}
-							onClick={toggleListening}
-							aria-label={isListening ? "Stop listening" : "Start listening"}
-						>
-							<MicIcon />
-						</button>
-
-						<p className="hint">Press Q or click the button</p>
-						<button
-							type="button"
-							className="hint json-download-link"
-							onClick={downloadSegments}
-						>
-							분석 데이터(JSON) 다운로드
-						</button>
-						<p className="status">{status}</p>
-
-						{stepTimings && (
-							<p className="debug-timings">
-								디버그 — 대사 추출 {formatSeconds(stepTimings.dialogue)} · 얼굴 인식{" "}
-								{formatSeconds(stepTimings.face)} · 화면해설 생성{" "}
-								{formatSeconds(stepTimings.narration)} · 음성 합성{" "}
-								{formatSeconds(stepTimings.combine)}
-							</p>
-						)}
-					</section>
 				</main>
 			)}
 		</div>
