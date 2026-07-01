@@ -59,7 +59,19 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 
 NARRATION_FRAMES_PER_SEGMENT = int(
-    os.getenv("NARRATION_FRAMES_PER_SEGMENT", "5")
+    os.getenv("NARRATION_FRAMES_PER_SEGMENT", "3")
+)
+
+NARRATION_MAX_CONCURRENCY = int(
+    os.getenv("NARRATION_MAX_CONCURRENCY", "3")
+)
+
+NARRATION_FRAME_MAX_PX = int(
+    os.getenv("NARRATION_FRAME_MAX_PX", "512")
+)
+
+NARRATION_JPEG_QUALITY = int(
+    os.getenv("NARRATION_JPEG_QUALITY", "80")
 )
 
 TTS_VOICE = os.getenv("TTS_VOICE", "ko-KR-SunHiNeural")
