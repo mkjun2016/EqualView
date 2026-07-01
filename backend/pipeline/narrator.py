@@ -4,17 +4,35 @@
 
 from __future__ import annotations
 
+import bisect
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import cv2
 from google import genai
 from google.genai import types
 
-from config import GEMINI_API_KEY, GEMINI_MODEL, NARRATION_FRAMES_PER_SEGMENT
+from config import (
+    GEMINI_API_KEY,
+    GEMINI_MODEL,
+    NARRATION_FRAME_MAX_PX,
+    NARRATION_FRAMES_PER_SEGMENT,
+    NARRATION_JPEG_QUALITY,
+    NARRATION_MAX_CONCURRENCY,
+)
 from utils.json_io import atomic_write_json, read_json
 from utils.paths import JobPaths
 
 _client: genai.Client | None = None
+
+
+@dataclass
+class NarrationJob:
+    segment: dict[str, Any]
+    frame_paths: list[Path]
+    prompt: str
 
 
 def get_gemini_client() -> genai.Client:
@@ -29,19 +47,22 @@ def get_gemini_client() -> genai.Client:
 
 
 def _select_frames(
-    samples: list[dict[str, Any]],
+    sorted_samples: list[dict[str, Any]],
     start: float,
     end: float,
     count: int,
 ) -> list[dict[str, Any]]:
     """
     구간 [start, end] 안의 샘플 중 최대 count개를 시간상 고르게 분포되도록 고른다.
+    sorted_samples는 timestamp 기준으로 정렬되어 있어야 한다.
     """
-    in_range = [
-        sample
-        for sample in samples
-        if start <= sample["timestamp"] <= end
-    ]
+    if not sorted_samples or count <= 0:
+        return []
+
+    timestamps = [sample["timestamp"] for sample in sorted_samples]
+    left = bisect.bisect_left(timestamps, start)
+    right = bisect.bisect_right(timestamps, end)
+    in_range = sorted_samples[left:right]
 
     if len(in_range) <= count:
         return in_range
@@ -128,6 +149,44 @@ def _build_prompt(
     )
 
 
+def _read_frame_jpeg_bytes(path: Path) -> bytes:
+    image = cv2.imread(str(path))
+
+    if image is None:
+        return path.read_bytes()
+
+    height, width = image.shape[:2]
+    longest = max(height, width)
+
+    if longest > NARRATION_FRAME_MAX_PX:
+        scale = NARRATION_FRAME_MAX_PX / longest
+        new_width = max(1, int(width * scale))
+        new_height = max(1, int(height * scale))
+        image = cv2.resize(
+            image,
+            (new_width, new_height),
+            interpolation=cv2.INTER_AREA,
+        )
+
+    ok, encoded = cv2.imencode(
+        ".jpg",
+        image,
+        [cv2.IMWRITE_JPEG_QUALITY, NARRATION_JPEG_QUALITY],
+    )
+
+    if not ok:
+        return path.read_bytes()
+
+    return encoded.tobytes()
+
+
+def _frame_part(path: Path) -> types.Part:
+    return types.Part.from_bytes(
+        data=_read_frame_jpeg_bytes(path),
+        mime_type="image/jpeg",
+    )
+
+
 def _generate_narration(
     client: genai.Client,
     frame_paths: list[Path],
@@ -136,12 +195,7 @@ def _generate_narration(
     contents: list[Any] = [prompt]
 
     for path in frame_paths:
-        contents.append(
-            types.Part.from_bytes(
-                data=path.read_bytes(),
-                mime_type="image/jpeg",
-            )
-        )
+        contents.append(_frame_part(path))
 
     response = client.models.generate_content(
         model=GEMINI_MODEL,
@@ -151,24 +205,20 @@ def _generate_narration(
     return (response.text or "").strip()
 
 
-def run_narration(job_id: str) -> dict[str, Any]:
-    paths = JobPaths(job_id)
-    segments_data = read_json(paths.segments_json)
-    face_data = read_json(paths.face_segments_json)
-
-    samples = face_data.get("samples", [])
-    segments = segments_data.get("segments", [])
-
-    client = get_gemini_client()
-    narrated_count = 0
-    failed_count = 0
+def _prepare_narration_jobs(
+    segments: list[dict[str, Any]],
+    sorted_samples: list[dict[str, Any]],
+    job_dir: Path,
+) -> list[NarrationJob]:
+    dialogue_segments = _dialogue_segments(segments)
+    jobs: list[NarrationJob] = []
 
     for segment in segments:
         if not segment.get("narration_safe"):
             continue
 
         frames = _select_frames(
-            samples,
+            sorted_samples,
             segment["start"],
             segment["end"],
             NARRATION_FRAMES_PER_SEGMENT,
@@ -181,27 +231,88 @@ def run_narration(job_id: str) -> dict[str, Any]:
             continue
 
         person_ids = _visible_person_ids(frames)
-        dialogue_segs = _dialogue_segments(segments)
         prior_dialogue, upcoming_dialogue = _dialogue_context(
-            dialogue_segs, segment["start"], segment["end"]
+            dialogue_segments,
+            segment["start"],
+            segment["end"],
         )
         prompt = _build_prompt(
-            segment["start"], segment["end"], person_ids,
-            prior_dialogue, upcoming_dialogue,
+            segment["start"],
+            segment["end"],
+            person_ids,
+            prior_dialogue,
+            upcoming_dialogue,
         )
-        frame_paths = [paths.job_dir / frame["path"] for frame in frames]
+        frame_paths = [job_dir / frame["path"] for frame in frames]
 
-        try:
-            segment["narration"] = _generate_narration(
-                client,
-                frame_paths,
-                prompt,
+        jobs.append(
+            NarrationJob(
+                segment=segment,
+                frame_paths=frame_paths,
+                prompt=prompt,
             )
+        )
+
+    return jobs
+
+
+def _run_narration_job(
+    client: genai.Client,
+    job: NarrationJob,
+) -> tuple[NarrationJob, str | None, str | None]:
+    try:
+        narration = _generate_narration(client, job.frame_paths, job.prompt)
+        return job, narration, None
+    except Exception as exc:
+        return job, None, str(exc)
+
+
+def _execute_narration_jobs(
+    client: genai.Client,
+    jobs: list[NarrationJob],
+) -> tuple[int, int]:
+    if not jobs:
+        return 0, 0
+
+    worker_count = min(NARRATION_MAX_CONCURRENCY, len(jobs))
+    narrated_count = 0
+    failed_count = 0
+
+    with ThreadPoolExecutor(max_workers=worker_count) as executor:
+        futures = [
+            executor.submit(_run_narration_job, client, job)
+            for job in jobs
+        ]
+
+        for future in as_completed(futures):
+            job, narration, error = future.result()
+
+            if error is not None:
+                job.segment["narration"] = ""
+                job.segment["narration_error"] = error
+                failed_count += 1
+                continue
+
+            job.segment["narration"] = narration
+            job.segment.pop("narration_error", None)
             narrated_count += 1
-        except Exception as exc:
-            segment["narration"] = ""
-            segment["narration_error"] = str(exc)
-            failed_count += 1
+
+    return narrated_count, failed_count
+
+
+def run_narration(job_id: str) -> dict[str, Any]:
+    paths = JobPaths(job_id)
+    segments_data = read_json(paths.segments_json)
+    face_data = read_json(paths.face_segments_json)
+
+    samples = face_data.get("samples", [])
+    segments = segments_data.get("segments", [])
+
+    sorted_samples = sorted(samples, key=lambda sample: sample["timestamp"])
+    jobs = _prepare_narration_jobs(segments, sorted_samples, paths.job_dir)
+
+    client = get_gemini_client()
+    narrated_count, failed_count = _execute_narration_jobs(client, jobs)
 
     atomic_write_json(paths.segments_json, segments_data)
 
