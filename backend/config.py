@@ -10,6 +10,10 @@ UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", str(BASE_DIR / "uploads")))
 
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 
+CELERY_WORKER_CONCURRENCY = int(
+    os.getenv("CELERY_WORKER_CONCURRENCY", "2")
+)
+
 FACE_MODEL_NAME = os.getenv("FACE_MODEL_NAME", "buffalo_l")
 FACE_MODEL_ROOT = Path(
     os.getenv("FACE_MODEL_ROOT", str(BASE_DIR / "models"))

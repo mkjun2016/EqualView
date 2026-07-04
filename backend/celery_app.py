@@ -13,7 +13,7 @@ if BACKEND_DIR not in sys.path:
 
 os.chdir(BACKEND_DIR)
 
-from config import REDIS_URL
+from config import CELERY_WORKER_CONCURRENCY, REDIS_URL
 
 celery_app = Celery("equalview", broker=REDIS_URL)
 
@@ -36,5 +36,8 @@ celery_app.conf.update(
     enable_utc=True,
     include=["tasks.video_pipeline"],
     worker_pool=worker_pool,
-    worker_concurrency=1 if worker_pool == "solo" else None,
+    worker_concurrency=(
+        1 if worker_pool == "solo" else CELERY_WORKER_CONCURRENCY
+    ),
+    worker_prefetch_multiplier=1,
 )

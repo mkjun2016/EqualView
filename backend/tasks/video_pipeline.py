@@ -80,23 +80,8 @@ def process_face_job(job_id: str) -> None:
 
 
 def _run_post_processing_if_ready(job_id: str) -> None:
-    job_data = job_store.get(job_id)
-    if job_data is None:
+    if not job_store.try_begin_post_processing(job_id):
         return
-
-    if (
-        job_data.get("status") != "COMPLETED"
-        or job_data.get("face_status") != "COMPLETED"
-        or job_data.get("narration_status", "PENDING") != "PENDING"
-        or job_data.get("combine_status", "PENDING") != "PENDING"
-    ):
-        return
-
-    job_store.update(
-        job_id,
-        narration_status="PROCESSING",
-        current_step="화면해설 생성 중",
-    )
 
     narration_started_at = time.monotonic()
 
