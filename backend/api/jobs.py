@@ -44,7 +44,6 @@ async def create_job(file: UploadFile = File(...)):
     )
 
     celery_app.send_task("tasks.process_video_job", args=[job_id])
-    celery_app.send_task("tasks.process_face_job", args=[job_id])
 
     return {"job_id": job_id, "status": "PENDING"}
 

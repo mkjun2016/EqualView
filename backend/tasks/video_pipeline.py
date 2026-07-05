@@ -25,8 +25,14 @@ def process_video_job(job_id: str) -> None:
     try:
         _ensure_backend_path()
         runner = importlib.import_module("pipeline.runner")
-        runner.run_analysis(job_id, job_store)
-        _run_post_processing_if_ready(job_id)
+        result = runner.run_analysis(job_id, job_store)
+
+        face_time_ranges = result.get("face_time_ranges")
+        celery_app.send_task(
+            "tasks.process_face_job",
+            args=[job_id],
+            kwargs={"time_ranges": face_time_ranges},
+        )
     except Exception as exc:
         job_store.update(
             job_id,
@@ -38,7 +44,10 @@ def process_video_job(job_id: str) -> None:
 
 
 @celery_app.task(name="tasks.process_face_job")
-def process_face_job(job_id: str) -> None:
+def process_face_job(
+    job_id: str,
+    time_ranges: list[dict[str, float]] | None = None,
+) -> None:
     started_at = time.monotonic()
 
     try:
@@ -53,7 +62,7 @@ def process_face_job(job_id: str) -> None:
         )
 
         face_runner = importlib.import_module("pipeline.face_runner")
-        result = face_runner.run_face_analysis(job_id)
+        result = face_runner.run_face_analysis(job_id, time_ranges=time_ranges)
 
         segment_enricher = importlib.import_module("pipeline.segment_enricher")
         segment_enricher.try_merge_face_segments_for_job(job_id)
@@ -66,6 +75,7 @@ def process_face_job(job_id: str) -> None:
             face_error=None,
             face_result=result,
             face_seconds=round(time.monotonic() - started_at, 2),
+            face_sample_count=result.get("sample_count", 0),
         )
         _run_post_processing_if_ready(job_id)
 

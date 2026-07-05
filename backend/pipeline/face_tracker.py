@@ -129,6 +129,18 @@ def get_face_analyzer() -> FaceAnalysis:
     return _face_analyzer
 
 
+def warmup_face_analyzer() -> None:
+    """
+    Worker 기동 시 InsightFace를 미리 로드해 첫 Face job의 cold start를 줄인다.
+    """
+    analyzer = get_face_analyzer()
+    dummy = np.zeros(
+        (FACE_DET_SIZE[0], FACE_DET_SIZE[0], 3),
+        dtype=np.uint8,
+    )
+    analyzer.get(dummy)
+
+
 def normalize_embedding(embedding: np.ndarray) -> np.ndarray:
     """
     얼굴 특징 벡터의 길이를 1로 맞춘다.

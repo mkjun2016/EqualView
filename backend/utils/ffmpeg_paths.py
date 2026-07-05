@@ -121,3 +121,39 @@ def get_video_metadata(file_path: Path) -> dict[str, Any]:
     duration = parse_duration(stderr)
     metadata = parse_video_metadata(stderr, duration=duration)
     return metadata
+
+
+def extract_video_frame_jpeg_bytes(
+    video_path: Path,
+    timestamp: float,
+) -> bytes | None:
+    command = [
+        get_ffmpeg_binary(),
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-ss",
+        f"{max(0.0, timestamp):.3f}",
+        "-i",
+        str(video_path),
+        "-frames:v",
+        "1",
+        "-f",
+        "image2pipe",
+        "-vcodec",
+        "mjpeg",
+        "pipe:1",
+    ]
+
+    import subprocess
+
+    result = subprocess.run(
+        command,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+
+    if result.returncode != 0 or not result.stdout:
+        return None
+
+    return result.stdout
