@@ -21,16 +21,12 @@ class JobPaths:
         return self.job_dir / "segments_enriched.json"
 
     @property
-    def face_frames_json(self) -> Path:
-        return self.job_dir / "face_frames.json"
+    def frame_samples_json(self) -> Path:
+        return self.job_dir / "frame_samples.json"
 
     @property
-    def face_segments_json(self) -> Path:
-        return self.job_dir / "face_segments.json"
-
-    @property
-    def annotated_frames_dir(self) -> Path:
-        return self.job_dir / "annotated_frames"
+    def frames_dir(self) -> Path:
+        return self.job_dir / "frames"
 
     @property
     def audio_wav(self) -> Path:

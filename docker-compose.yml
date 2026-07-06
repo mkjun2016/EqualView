@@ -26,16 +26,13 @@ services:
       redis:
         condition: service_healthy
 
-
   worker:
     build:
       context: ./backend
-    command: celery -A celery_app worker --loglevel=info --concurrency=1
+    command: celery -A celery_app.celery_app worker --loglevel=info --pool=solo
     environment:
       REDIS_URL: redis://redis:6379/0
       UPLOAD_DIR: /app/uploads
-
-
       HF_HOME: /root/.cache/huggingface
     volumes:
       - uploads_data:/app/uploads

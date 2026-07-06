@@ -40,7 +40,7 @@ export async function getJobSegmentsEnriched(jobId) {
   return res.json()
 }
 
-export function getAnnotatedFrameUrl(jobId, frame) {
+export function getFrameUrl(jobId, frame) {
   const path = frame?.path || ''
   const filename = path.split('/').pop()
   if (!jobId || !filename) return null
@@ -57,9 +57,6 @@ export function collectPreviewFrames(enrichedResult) {
       previews.push({
         ...frame,
         segmentId: segment.segment_id,
-        personIds: (frame.faces ?? [])
-          .map((face) => (typeof face === 'string' ? face : face?.person_id))
-          .filter(Boolean),
       })
     }
   }
@@ -80,15 +77,12 @@ export async function sendVoiceCommand(audioBlob) {
   return res.json()
 }
 
-export function isFaceStatusTerminal(faceStatus) {
-  return faceStatus === 'COMPLETED' || faceStatus === 'FAILED'
+export function isFrameStatusTerminal(frameStatus) {
+  return frameStatus === 'COMPLETED' || frameStatus === 'FAILED'
 }
 
 export function isJobAnalysisComplete(job) {
-  return (
-    job?.status === 'COMPLETED' &&
-    isFaceStatusTerminal(job?.face_status)
-  )
+  return job?.status === 'COMPLETED' && isFrameStatusTerminal(job?.frame_status)
 }
 
 export const JOB_POLL_DELAYS_MS = [2000, 3000, 5000]
@@ -98,9 +92,9 @@ export function createJobPollSnapshot(job) {
     status: job?.status ?? null,
     progress: job?.progress ?? 0,
     current_step: job?.current_step ?? null,
-    face_status: job?.face_status ?? null,
-    face_progress: job?.face_progress ?? 0,
-    face_current_step: job?.face_current_step ?? null,
+    frame_status: job?.frame_status ?? null,
+    frame_progress: job?.frame_progress ?? 0,
+    frame_current_step: job?.frame_current_step ?? null,
   })
 }
 
@@ -118,30 +112,30 @@ export function getJobPollDelayMs(delayIndex) {
 
 export function deriveOverallProgress(job) {
   const speechProgress = job?.progress ?? 0
-  const faceProgress = job?.face_progress ?? 0
+  const frameProgress = job?.frame_progress ?? 0
 
   if (job?.status !== 'COMPLETED') {
     return Math.round(speechProgress * 0.5)
   }
 
-  if (job?.face_status === 'COMPLETED' || job?.face_status === 'FAILED') {
+  if (isFrameStatusTerminal(job?.frame_status)) {
     return 100
   }
 
-  return Math.round(50 + faceProgress * 0.5)
+  return Math.round(50 + frameProgress * 0.5)
 }
 
 export function deriveProcessingSteps(job) {
   const titles = [
     'Extracting Audio',
-    'Detecting Faces',
-    'Merging Segments',
+    'Extracting Frames',
+    'Building Output',
     'Ready',
   ]
 
   const status = job?.status ?? 'PENDING'
   const progress = job?.progress ?? 0
-  const faceStatus = job?.face_status ?? 'PENDING'
+  const frameStatus = job?.frame_status ?? 'PENDING'
 
   if (status === 'FAILED') {
     return titles.map((title, index) => ({
@@ -157,24 +151,21 @@ export function deriveProcessingSteps(job) {
         ? 'in-progress'
         : 'waiting'
 
-  let faceState = 'waiting'
-  if (faceStatus === 'COMPLETED') faceState = 'completed'
-  else if (faceStatus === 'FAILED') faceState = 'failed'
-  else if (faceStatus === 'PROCESSING') faceState = 'in-progress'
-  else if (status === 'COMPLETED') faceState = 'in-progress'
+  let frameState = 'waiting'
+  if (frameStatus === 'COMPLETED') frameState = 'completed'
+  else if (frameStatus === 'FAILED') frameState = 'failed'
+  else if (frameStatus === 'PROCESSING') frameState = 'in-progress'
 
-  let mergeState = 'waiting'
-  if (isJobAnalysisComplete(job)) mergeState = 'completed'
-  else if (status === 'COMPLETED' && faceStatus === 'PROCESSING') {
-    mergeState = 'in-progress'
-  }
+  let outputState = 'waiting'
+  if (isJobAnalysisComplete(job)) outputState = 'completed'
+  else if (status === 'COMPLETED') outputState = 'in-progress'
 
   const readyState = isJobAnalysisComplete(job) ? 'completed' : 'waiting'
 
   return [
     { title: titles[0], state: audioState },
-    { title: titles[1], state: faceState },
-    { title: titles[2], state: mergeState },
+    { title: titles[1], state: frameState },
+    { title: titles[2], state: outputState },
     { title: titles[3], state: readyState },
   ]
 }
@@ -186,12 +177,12 @@ export function formatJobStatusMessage(job) {
     parts.push(`${job.current_step} (${job.progress ?? 0}%)`)
   }
 
-  if (job?.face_current_step && job?.face_status === 'PROCESSING') {
-    parts.push(`${job.face_current_step} (${job.face_progress ?? 0}%)`)
+  if (job?.frame_current_step && job?.frame_status === 'PROCESSING') {
+    parts.push(`${job.frame_current_step} (${job.frame_progress ?? 0}%)`)
   }
 
-  if (job?.face_status === 'FAILED' && job?.face_error) {
-    parts.push(`Face: ${job.face_error}`)
+  if (job?.frame_status === 'FAILED' && job?.frame_error) {
+    parts.push(`Frame: ${job.frame_error}`)
   }
 
   return parts.join(' · ')
@@ -199,7 +190,7 @@ export function formatJobStatusMessage(job) {
 
 export const INITIAL_PROCESSING_STEPS = [
   { title: 'Extracting Audio', state: 'in-progress' },
-  { title: 'Detecting Faces', state: 'waiting' },
-  { title: 'Merging Segments', state: 'waiting' },
+  { title: 'Extracting Frames', state: 'waiting' },
+  { title: 'Building Output', state: 'waiting' },
   { title: 'Ready', state: 'waiting' },
 ]

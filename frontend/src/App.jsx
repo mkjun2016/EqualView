@@ -7,7 +7,7 @@ import {
 	deriveOverallProgress,
 	deriveProcessingSteps,
 	formatJobStatusMessage,
-	getAnnotatedFrameUrl,
+	getFrameUrl,
 	getJobPollDelayMs,
 	getJobSegmentsEnriched,
 	getJobStatus,
@@ -47,10 +47,7 @@ function ProcessingStep({ icon, title, state }) {
 }
 
 function FramePreviewCard({ jobId, frame }) {
-	const imageUrl = getAnnotatedFrameUrl(jobId, frame);
-	const personLabel = frame.personIds?.length
-		? frame.personIds.join(", ")
-		: "No faces";
+	const imageUrl = getFrameUrl(jobId, frame);
 
 	return (
 		<article className="frame-preview-card">
@@ -59,7 +56,7 @@ function FramePreviewCard({ jobId, frame }) {
 					<img
 						className="frame-preview-image"
 						src={imageUrl}
-						alt={`Annotated frame at ${frame.timestamp}s`}
+						alt={`Frame at ${frame.timestamp}s`}
 						loading="lazy"
 					/>
 				) : (
@@ -69,7 +66,6 @@ function FramePreviewCard({ jobId, frame }) {
 			<div className="frame-preview-meta">
 				<p className="frame-preview-time">{frame.timestamp.toFixed(2)}s</p>
 				<p className="frame-preview-segment">{frame.segmentId}</p>
-				<p className="frame-preview-persons">{personLabel}</p>
 			</div>
 		</article>
 	);
@@ -431,9 +427,6 @@ function App() {
 	const speechCount = summary.speech_segments ?? 0;
 	const silenceCount = summary.non_speech_segments ?? 0;
 	const narrationCandidates = summary.narration_candidate_count ?? 0;
-	const faceCompletedCount = (enrichedResult?.segments ?? []).filter(
-		(segment) => (segment.visible_person_in_segment ?? []).length > 0
-	).length;
 	const previewFrames = collectPreviewFrames(enrichedResult);
 
 	return (
@@ -542,13 +535,13 @@ function App() {
 						</button>
 					</section>
 
-					{previewFrames.length > 0 ? (
+					{previewFrames.length > 0 && (
 						<section className="frame-preview-section">
 							<div className="frame-preview-header">
 								<h2 className="frame-preview-title">Representative frames</h2>
 								<p className="frame-preview-subtitle">
-									{previewFrames.length} annotated frame
-									{previewFrames.length === 1 ? "" : "s"} selected for narration
+									{previewFrames.length} frame
+									{previewFrames.length === 1 ? "" : "s"} from non-speech segments
 								</p>
 							</div>
 							<div className="frame-preview-grid">
@@ -561,10 +554,6 @@ function App() {
 								))}
 							</div>
 						</section>
-					) : (
-						<p className="hint frame-preview-empty">
-							No annotated frames yet. Face analysis may still be missing for this job.
-						</p>
 					)}
 
 					<section className="watch-controls">
@@ -572,8 +561,6 @@ function App() {
 							Analysis complete: {speechCount} speech / {silenceCount} non-speech
 							{" · "}
 							{narrationCandidates} narration candidates
-							{" · "}
-							{faceCompletedCount} with face data
 						</p>
 
 						<button

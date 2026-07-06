@@ -30,43 +30,43 @@ def process_video_job(job_id: str) -> None:
             job_id,
             status="FAILED",
             error=str(exc),
-            current_step="실패",
+            current_step="Failed",
         )
         raise
 
 
-@celery_app.task(name="tasks.process_face_job")
-def process_face_job(job_id: str) -> None:
+@celery_app.task(name="tasks.process_frame_job")
+def process_frame_job(job_id: str) -> None:
     try:
         _ensure_backend_path()
 
         job_store.update(
             job_id,
-            face_status="PROCESSING",
-            face_progress=10,
-            face_current_step="얼굴 분석 시작",
-            face_error=None,
+            frame_status="PROCESSING",
+            frame_progress=10,
+            frame_current_step="프레임 추출 시작",
+            frame_error=None,
         )
 
-        face_runner = importlib.import_module("pipeline.face_runner")
-        result = face_runner.run_face_analysis(job_id)
+        frame_extractor = importlib.import_module("pipeline.frame_extractor")
+        result = frame_extractor.run_frame_extraction(job_id)
 
         segment_enricher = importlib.import_module("pipeline.segment_enricher")
-        segment_enricher.try_merge_face_segments_for_job(job_id)
+        segment_enricher.try_merge_frame_samples_for_job(job_id)
 
         job_store.update(
             job_id,
-            face_status="COMPLETED",
-            face_progress=100,
-            face_current_step="얼굴 분석 완료",
-            face_error=None,
-            face_result=result,
+            frame_status="COMPLETED",
+            frame_progress=100,
+            frame_current_step="프레임 추출 완료",
+            frame_error=None,
+            frame_result=result,
         )
     except Exception as exc:
         job_store.update(
             job_id,
-            face_status="FAILED",
-            face_error=str(exc),
-            face_current_step="얼굴 분석 실패",
+            frame_status="FAILED",
+            frame_error=str(exc),
+            frame_current_step="프레임 추출 실패",
         )
         raise

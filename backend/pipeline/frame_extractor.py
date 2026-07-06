@@ -5,32 +5,18 @@ from typing import Any
 import cv2
 import numpy as np
 
-from config import (
-    ANNOTATED_FRAME_INTERVAL_SECONDS,
-    FACE_FRAME_SIMILARITY_THRESHOLD,
-)
-from pipeline.face_renderer import (
-    draw_face_annotations,
-    save_annotated_frame,
-)
-from pipeline.face_tracker import FaceTracker
+from config import FRAME_INTERVAL_SECONDS, FRAME_SIMILARITY_THRESHOLD
 from utils.ffmpeg_paths import probe_media_info
 from utils.json_io import atomic_write_json
 from utils.paths import JobPaths
 
 
-def run_face_analysis(job_id: str) -> dict[str, Any]:
-    """
-    Sample the source video at a fixed interval, detect/track faces on those
-    frames only, and save annotated JPG frames plus face_segments.json.
-    """
+def run_frame_extraction(job_id: str) -> dict[str, Any]:
     paths = JobPaths(job_id)
     input_video = paths.find_input_video()
-
-    paths.annotated_frames_dir.mkdir(parents=True, exist_ok=True)
+    paths.frames_dir.mkdir(parents=True, exist_ok=True)
 
     capture = cv2.VideoCapture(str(input_video))
-
     if not capture.isOpened():
         raise RuntimeError(f"Could not open video: {input_video}")
 
@@ -49,13 +35,8 @@ def run_face_analysis(job_id: str) -> dict[str, Any]:
     try:
         duration = probe_media_info(input_video).duration
     except Exception:
-        duration = (
-            reported_frame_count / fps
-            if reported_frame_count > 0
-            else 0
-        )
+        duration = reported_frame_count / fps if reported_frame_count > 0 else 0
 
-    tracker = FaceTracker()
     sample_interval = _sample_interval_seconds()
     next_sample_timestamp = 0.0
     processed_frame_count = 0
@@ -70,7 +51,6 @@ def run_face_analysis(job_id: str) -> dict[str, Any]:
     try:
         while True:
             success, frame = capture.read()
-
             if not success:
                 break
 
@@ -90,57 +70,22 @@ def run_face_analysis(job_id: str) -> dict[str, Any]:
             fingerprint = _frame_fingerprint(frame)
 
             if last_saved_fingerprint is not None:
-                similarity = _frame_similarity(
-                    last_saved_fingerprint,
-                    fingerprint,
-                )
-
-                if similarity >= FACE_FRAME_SIMILARITY_THRESHOLD:
+                similarity = _frame_similarity(last_saved_fingerprint, fingerprint)
+                if similarity >= FRAME_SIMILARITY_THRESHOLD:
                     similarity_skipped_count += 1
                     continue
 
-            faces = tracker.detect(frame) 
-
-
-            detections = tracker.assign_faces(
-                faces=faces,
-                timestamp=timestamp,
-                frame_width=frame_width,
-                frame_height=frame_height,
-            )
-
-            annotated_frame = draw_face_annotations(
-                frame=frame,
-                detections=detections,
-            )
-
             filename = _frame_filename(timestamp)
-            output_path = paths.annotated_frames_dir / filename
-
-            save_annotated_frame(
-                frame=annotated_frame,
-                output_path=output_path,
-            )
+            output_path = paths.frames_dir / filename
+            _save_frame(frame, output_path)
 
             samples.append(
                 {
+                    "frame_id": output_path.stem,
                     "timestamp": round(timestamp, 3),
-                    "path": f"annotated_frames/{filename}",
-                    "visible_person_ids": [
-                        detection["person_id"]
-                        for detection in detections
-                    ],
-                    "faces": [
-                        {
-                            "person_id": detection["person_id"],
-                            "confidence": detection["confidence"],
-                            "bbox": detection["bbox"],
-                        }
-                        for detection in detections
-                    ],
+                    "path": f"frames/{filename}",
                 }
             )
-
             last_saved_fingerprint = fingerprint
             last_saved_timestamp = timestamp
 
@@ -164,7 +109,7 @@ def run_face_analysis(job_id: str) -> dict[str, Any]:
             "processed_frame_count": processed_frame_count,
             "processed_duration": round(processed_duration, 3),
             "sample_interval_seconds": sample_interval,
-            "similarity_threshold": FACE_FRAME_SIMILARITY_THRESHOLD,
+            "similarity_threshold": FRAME_SIMILARITY_THRESHOLD,
             "sample_candidate_count": sampled_candidate_count,
             "saved_sample_count": len(samples),
             "similarity_skipped_count": similarity_skipped_count,
@@ -184,21 +129,19 @@ def run_face_analysis(job_id: str) -> dict[str, Any]:
         "samples": samples,
     }
 
-    atomic_write_json(paths.face_segments_json, result)
+    atomic_write_json(paths.frame_samples_json, result)
 
     return {
         "duration": round(duration, 3),
-        "face_count": len(tracker.identities),
         "sample_count": len(samples),
-        "face_segments_json": paths.face_segments_json.name,
+        "frame_samples_json": paths.frame_samples_json.name,
     }
 
 
 def _sample_interval_seconds() -> float:
-    if ANNOTATED_FRAME_INTERVAL_SECONDS <= 0:
+    if FRAME_INTERVAL_SECONDS <= 0:
         return 1 / 30
-
-    return ANNOTATED_FRAME_INTERVAL_SECONDS
+    return FRAME_INTERVAL_SECONDS
 
 
 def _frame_filename(timestamp: float) -> str:
@@ -208,15 +151,21 @@ def _frame_filename(timestamp: float) -> str:
 def _frame_fingerprint(frame: np.ndarray) -> np.ndarray:
     resized = cv2.resize(frame, (160, 90), interpolation=cv2.INTER_AREA)
     gray = cv2.cvtColor(resized, cv2.COLOR_BGR2GRAY)
-
     return gray.astype(np.float32)
 
 
-def _frame_similarity(
-    previous: np.ndarray,
-    current: np.ndarray,
-) -> float:
+def _frame_similarity(previous: np.ndarray, current: np.ndarray) -> float:
     difference = np.mean(np.abs(previous - current))
-
     return float(1.0 - (difference / 255.0))
 
+
+def _save_frame(frame: np.ndarray, output_path) -> None:
+    success, encoded_image = cv2.imencode(
+        ".jpg",
+        frame,
+        [cv2.IMWRITE_JPEG_QUALITY, 95],
+    )
+    if not success:
+        raise RuntimeError(f"Could not encode frame: {output_path}")
+
+    output_path.write_bytes(encoded_image.tobytes())

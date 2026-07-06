@@ -9,7 +9,7 @@ from pipeline.audio_extractor import (
 from pipeline.segment_enricher import (
     build_segments_enriched,
     save_segments_enriched,
-    try_merge_face_segments_for_job,
+    try_merge_frame_samples_for_job,
 )
 from pipeline.transcriber import build_segments_from_words, transcribe_audio
 from utils.ffmpeg_paths import MediaProbeInfo, probe_media_info
@@ -104,7 +104,7 @@ def run_analysis(job_id: str, store: JobStore) -> dict:
         language=language,
     )
     save_segments_enriched(job_id, enriched)
-    try_merge_face_segments_for_job(job_id)
+    try_merge_frame_samples_for_job(job_id)
 
     store.update(
         job_id,
