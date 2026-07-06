@@ -38,3 +38,12 @@ Thumbs.db
 # IDE
 .vscode/
 .idea/
+
+# ML / downloaded model weights
+backend/models/models/
+*.onnx
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+*.bin

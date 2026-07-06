@@ -14,7 +14,7 @@ from pipeline.face_renderer import (
     save_annotated_frame,
 )
 from pipeline.face_tracker import FaceTracker
-from pipeline.audio_extractor import get_media_duration
+from utils.ffmpeg_paths import probe_media_info
 from utils.json_io import atomic_write_json
 from utils.paths import JobPaths
 
@@ -47,7 +47,7 @@ def run_face_analysis(job_id: str) -> dict[str, Any]:
         raise RuntimeError("Video has invalid dimensions.")
 
     try:
-        duration = get_media_duration(input_video)
+        duration = probe_media_info(input_video).duration
     except Exception:
         duration = (
             reported_frame_count / fps
