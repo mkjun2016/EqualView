@@ -432,7 +432,7 @@ function App() {
 	const silenceCount = summary.non_speech_segments ?? 0;
 	const narrationCandidates = summary.narration_candidate_count ?? 0;
 	const faceCompletedCount = (enrichedResult?.segments ?? []).filter(
-		(segment) => segment.persons?.face_status === "completed"
+		(segment) => (segment.visible_person_in_segment ?? []).length > 0
 	).length;
 	const previewFrames = collectPreviewFrames(enrichedResult);
 

@@ -181,7 +181,6 @@ def run_face_analysis(job_id: str) -> dict[str, Any]:
             ),
             "duration_gap": round(duration_gap, 3),
         },
-        "identities": tracker.get_identities(),
         "samples": samples,
     }
 

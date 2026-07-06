@@ -64,7 +64,6 @@ def build_segments_from_words(words, duration, has_audio):
                 "start": 0,
                 "end": duration,
                 "type": "non_speech",
-                "sound_category": "no_audio_track",
                 "text": "",
             }
         ]
@@ -75,7 +74,6 @@ def build_segments_from_words(words, duration, has_audio):
                 "start": 0,
                 "end": duration,
                 "type": "non_speech",
-                "sound_category": "audio_exists_but_no_detected_speech",
                 "text": "",
             }
         ]
@@ -92,7 +90,6 @@ def build_segments_from_words(words, duration, has_audio):
             "start": 0,
             "end": round(current_start, 2),
             "type": "non_speech",
-            "sound_category": "silence_or_background",
             "text": "",
         })
 
@@ -107,7 +104,6 @@ def build_segments_from_words(words, duration, has_audio):
                 "start": round(current_start, 2),
                 "end": round(current_end, 2),
                 "type": "speech",
-                "sound_category": "human_speech",
                 "text": " ".join([w["word"] for w in current_words]),
             })
 
@@ -115,7 +111,6 @@ def build_segments_from_words(words, duration, has_audio):
                 "start": round(prev["end"], 2),
                 "end": round(curr["start"], 2),
                 "type": "non_speech",
-                "sound_category": "silence_or_background",
                 "text": "",
             })
 
@@ -130,7 +125,6 @@ def build_segments_from_words(words, duration, has_audio):
         "start": round(current_start, 2),
         "end": round(current_end, 2),
         "type": "speech",
-        "sound_category": "human_speech",
         "text": " ".join([w["word"] for w in current_words]),
     })
 
@@ -141,7 +135,6 @@ def build_segments_from_words(words, duration, has_audio):
             "start": round(last_end, 2),
             "end": duration,
             "type": "non_speech",
-            "sound_category": "silence_or_background",
             "text": "",
         })
 

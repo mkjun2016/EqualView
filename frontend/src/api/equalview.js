@@ -41,7 +41,7 @@ export async function getJobSegmentsEnriched(jobId) {
 }
 
 export function getAnnotatedFrameUrl(jobId, frame) {
-  const path = frame?.annotated_path || frame?.path || ''
+  const path = frame?.path || ''
   const filename = path.split('/').pop()
   if (!jobId || !filename) return null
   return `${BASE}/jobs/${jobId}/frames/${encodeURIComponent(filename)}`
@@ -52,13 +52,13 @@ export function collectPreviewFrames(enrichedResult) {
 
   for (const segment of enrichedResult?.segments ?? []) {
     for (const frame of segment.frames ?? []) {
-      if (!frame?.annotated_path && !frame?.path) continue
+      if (!frame?.path) continue
 
       previews.push({
         ...frame,
         segmentId: segment.segment_id,
         personIds: (frame.faces ?? [])
-          .map((face) => face.person_id)
+          .map((face) => (typeof face === 'string' ? face : face?.person_id))
           .filter(Boolean),
       })
     }
