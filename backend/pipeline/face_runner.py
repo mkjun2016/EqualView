@@ -99,7 +99,17 @@ def run_face_analysis(job_id: str) -> dict[str, Any]:
                     similarity_skipped_count += 1
                     continue
 
-            faces = tracker.detect(frame)
+            faces = tracker.detect(frame) 
+
+
+
+
+##########################
+
+
+
+
+
             detections = tracker.assign_faces(
                 faces=faces,
                 timestamp=timestamp,
@@ -131,7 +141,6 @@ def run_face_analysis(job_id: str) -> dict[str, Any]:
                     "faces": [
                         {
                             "person_id": detection["person_id"],
-                            "color": detection["color"],
                             "confidence": detection["confidence"],
                             "bbox": detection["bbox"],
                         }

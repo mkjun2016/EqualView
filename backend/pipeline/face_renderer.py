@@ -18,7 +18,7 @@ def draw_face_annotations(
 ) -> np.ndarray:
     """
     원본 프레임을 복사한 뒤,
-    얼굴별 색 테두리와 person_id 라벨을 그려 반환한다.
+    얼굴별 빨간색 테두리와 person_id 라벨을 그려 반환한다.
     """
     annotated = frame.copy()
     frame_height, frame_width = annotated.shape[:2]

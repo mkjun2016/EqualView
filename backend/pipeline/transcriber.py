@@ -109,7 +109,6 @@ def build_segments_from_words(words, duration, has_audio):
                 "type": "speech",
                 "sound_category": "human_speech",
                 "text": " ".join([w["word"] for w in current_words]),
-                "words": current_words,
             })
 
             segments.append({
@@ -133,7 +132,6 @@ def build_segments_from_words(words, duration, has_audio):
         "type": "speech",
         "sound_category": "human_speech",
         "text": " ".join([w["word"] for w in current_words]),
-        "words": current_words,
     })
 
     last_end = words[-1]["end"]
