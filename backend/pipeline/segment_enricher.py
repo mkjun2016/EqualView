@@ -7,11 +7,11 @@ from utils.paths import JobPaths
 DEFAULT_SETTINGS = {
     "narration_min_duration": 3.0,
     "frame_interval": 0.5,
+    # segment당 프레임 제한 5개
     "max_frames_per_segment": 5,
     "language": "ko",
     "pipeline_version": "mvp2",
 }
-
 
 def _segment_id(index: int) -> str:
     return f"seg_{index + 1:04d}"

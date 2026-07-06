@@ -102,14 +102,6 @@ def run_face_analysis(job_id: str) -> dict[str, Any]:
             faces = tracker.detect(frame) 
 
 
-
-
-##########################
-
-
-
-
-
             detections = tracker.assign_faces(
                 faces=faces,
                 timestamp=timestamp,
