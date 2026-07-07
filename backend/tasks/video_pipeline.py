@@ -25,8 +25,14 @@ def process_video_job(job_id: str) -> None:
     try:
         _ensure_backend_path()
         runner = importlib.import_module("pipeline.runner")
-        runner.run_analysis(job_id, job_store)
-        _run_post_processing_if_ready(job_id)
+        result = runner.run_analysis(job_id, job_store)
+
+        face_time_ranges = result.get("face_time_ranges")
+        celery_app.send_task(
+            "tasks.process_face_job",
+            args=[job_id],
+            kwargs={"time_ranges": face_time_ranges},
+        )
     except Exception as exc:
         job_store.update(
             job_id,
@@ -38,7 +44,10 @@ def process_video_job(job_id: str) -> None:
 
 
 @celery_app.task(name="tasks.process_face_job")
-def process_face_job(job_id: str) -> None:
+def process_face_job(
+    job_id: str,
+    time_ranges: list[dict[str, float]] | None = None,
+) -> None:
     started_at = time.monotonic()
 
     try:
@@ -53,7 +62,7 @@ def process_face_job(job_id: str) -> None:
         )
 
         face_runner = importlib.import_module("pipeline.face_runner")
-        result = face_runner.run_face_analysis(job_id)
+        result = face_runner.run_face_analysis(job_id, time_ranges=time_ranges)
 
         segment_enricher = importlib.import_module("pipeline.segment_enricher")
         segment_enricher.try_merge_face_segments_for_job(job_id)
@@ -66,6 +75,7 @@ def process_face_job(job_id: str) -> None:
             face_error=None,
             face_result=result,
             face_seconds=round(time.monotonic() - started_at, 2),
+            face_sample_count=result.get("sample_count", 0),
         )
         _run_post_processing_if_ready(job_id)
 
@@ -80,23 +90,8 @@ def process_face_job(job_id: str) -> None:
 
 
 def _run_post_processing_if_ready(job_id: str) -> None:
-    job_data = job_store.get(job_id)
-    if job_data is None:
+    if not job_store.try_begin_post_processing(job_id):
         return
-
-    if (
-        job_data.get("status") != "COMPLETED"
-        or job_data.get("face_status") != "COMPLETED"
-        or job_data.get("narration_status", "PENDING") != "PENDING"
-        or job_data.get("combine_status", "PENDING") != "PENDING"
-    ):
-        return
-
-    job_store.update(
-        job_id,
-        narration_status="PROCESSING",
-        current_step="화면해설 생성 중",
-    )
 
     narration_started_at = time.monotonic()
 
@@ -112,10 +107,26 @@ def _run_post_processing_if_ready(job_id: str) -> None:
         )
         return
 
+    narration_status = narrator.resolve_narration_status(narration_result)
+    narration_error = None
+
+    if narration_status == "FAILED":
+        narration_error = (
+            f"Gemini narration failed for all "
+            f"{narration_result.get('narration_job_count', 0)} segments."
+        )
+    elif narration_status == "PARTIAL":
+        narration_error = (
+            f"Gemini narration failed for "
+            f"{narration_result.get('failed_segment_count', 0)} of "
+            f"{narration_result.get('narration_job_count', 0)} segments."
+        )
+
     job_store.update(
         job_id,
-        narration_status="COMPLETED",
+        narration_status=narration_status,
         narration_result=narration_result,
+        narration_error=narration_error,
         narration_seconds=round(time.monotonic() - narration_started_at, 2),
         combine_status="PROCESSING",
         current_step="화면해설 음성 합성 중",

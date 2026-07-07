@@ -13,6 +13,8 @@ from pipeline.segment_enricher import (
     try_merge_face_segments_for_job,
 )
 from pipeline.transcriber import build_segments_from_words, transcribe_audio
+from pipeline.face_ranges import build_narration_safe_time_ranges
+from config import FACE_RANGE_PADDING_SECONDS
 from utils.ffmpeg_paths import MediaProbeInfo, probe_media_info
 from utils.json_io import atomic_write_json
 from utils.paths import JobPaths
@@ -109,6 +111,12 @@ def run_analysis(job_id: str, store: JobStore) -> dict:
     save_segments_enriched(job_id, enriched)
     try_merge_face_segments_for_job(job_id)
 
+    face_time_ranges = build_narration_safe_time_ranges(
+        segments,
+        context.duration,
+        FACE_RANGE_PADDING_SECONDS,
+    )
+
     store.update(
         job_id,
         status="COMPLETED",
@@ -116,6 +124,7 @@ def run_analysis(job_id: str, store: JobStore) -> dict:
         current_step="분석 완료",
         error=None,
         dialogue_seconds=round(time.monotonic() - started_at, 2),
+        face_analyzed_ranges=face_time_ranges,
     )
 
     return {
@@ -123,4 +132,5 @@ def run_analysis(job_id: str, store: JobStore) -> dict:
         "has_audio": context.has_audio,
         "segment_count": len(segments),
         "narration_candidate_count": enriched["summary"]["narration_candidate_count"],
+        "face_time_ranges": face_time_ranges,
     }

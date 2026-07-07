@@ -3,7 +3,6 @@ from pathlib import Path
 
 import pytest
 
-from config import ANNOTATED_FRAME_INTERVAL_SECONDS
 from pipeline.segment_enricher import (
     adapt_face_segments_samples,
     build_segments_enriched,
@@ -79,11 +78,15 @@ def test_build_segments_enriched_basic(enriched):
     assert segments[0]["narration_candidate"] is False, "2s non_speech is under 3s threshold"
     assert segments[2]["narration_candidate"] is True, "4.5s non_speech should be candidate"
 
+    assert segments[1]["candidate_reason"] == "speech_segment"
+    assert segments[0]["candidate_reason"] == "duration_under_3s"
+    assert segments[2]["candidate_reason"] == "non_speech_duration_over_3s"
+
     for segment in segments:
         assert segment["scene_analysis"] is None
         assert segment["generated_narration"] is None
         assert segment["tts"] is None
-        assert segment["visible_person_in_segment"] is None
+        assert segment["persons"]["face_status"] == "pending"
 
 
 def test_speech_context_for_seg_0003(enriched):
@@ -138,25 +141,48 @@ def test_save_segments_enriched(upload_dir, enriched):
 
 MOCK_FACE_FRAMES = {
     "job_id": JOB_ID,
-    "frame_interval": ANNOTATED_FRAME_INTERVAL_SECONDS,
+    "frame_interval": 0.5,
+    "persons": [
+        {
+            "person_id": "person_001",
+            "representative_face_path": f"uploads/{JOB_ID}/faces/person_001.jpg",
+        }
+    ],
     "frames": [
         {
             "frame_id": "frame_000010",
             "timestamp": 5.5,
-            "path": f"uploads/{JOB_ID}/frames/frame_000010.jpg",
-            "faces": ["person_001"],
+            "raw_path": f"uploads/{JOB_ID}/frames/frame_000010.jpg",
+            "annotated_path": f"uploads/{JOB_ID}/frames_annotated/frame_000010.jpg",
+            "faces": [
+                {
+                    "person_id": "person_001",
+                    "bbox": [420, 120, 560, 310],
+                    "confidence": 0.94,
+                    "label_color": "red",
+                }
+            ],
         },
         {
             "frame_id": "frame_000011",
             "timestamp": 6.0,
-            "path": f"uploads/{JOB_ID}/frames/frame_000011.jpg",
+            "raw_path": f"uploads/{JOB_ID}/frames/frame_000011.jpg",
+            "annotated_path": f"uploads/{JOB_ID}/frames_annotated/frame_000011.jpg",
             "faces": [],
         },
         {
             "frame_id": "frame_000012",
             "timestamp": 7.0,
-            "path": f"uploads/{JOB_ID}/frames/frame_000012.jpg",
-            "faces": ["person_001"],
+            "raw_path": f"uploads/{JOB_ID}/frames/frame_000012.jpg",
+            "annotated_path": f"uploads/{JOB_ID}/frames_annotated/frame_000012.jpg",
+            "faces": [
+                {
+                    "person_id": "person_001",
+                    "bbox": [430, 125, 570, 315],
+                    "confidence": 0.91,
+                    "label_color": "red",
+                }
+            ],
         },
     ],
 }
@@ -179,6 +205,7 @@ def test_merge_face_frames_into_segments(upload_dir, enriched):
     merged = merge_face_frames_into_segments(
         enriched_path,
         face_path,
+        max_frames_per_segment=5,
         save=False,
     )
 
@@ -188,15 +215,19 @@ def test_merge_face_frames_into_segments(upload_dir, enriched):
     assert candidate["segment_id"] == "seg_0003"
     assert non_candidate["frames"] == [], "non-candidate segments should not receive frames"
 
-    assert len(candidate["frames"]) == 3, "all in-range frames should be attached"
+    assert len(candidate["frames"]) == 3, "all in-range frames should be attached when under max"
+    assert len(candidate["frames"]) <= 5, "frame count must respect max_frames_per_segment"
 
     for frame in candidate["frames"]:
         assert candidate["start"] <= frame["timestamp"] <= candidate["end"]
+        assert frame["selected"] is True
 
-    assert candidate["visible_person_in_segment"] == ["person_001"]
+    assert candidate["persons"]["visible_person_ids"] == ["person_001"]
+    assert candidate["persons"]["main_person_id"] == "person_001"
+    assert candidate["persons"]["face_status"] == "completed"
 
 
-def test_merge_face_frames_includes_all_matching_frames(upload_dir, enriched):
+def test_merge_face_frames_respects_max_frames_per_segment(upload_dir, enriched):
     paths = JobPaths(JOB_ID)
     paths.job_dir.mkdir(parents=True, exist_ok=True)
 
@@ -206,8 +237,9 @@ def test_merge_face_frames_includes_all_matching_frames(upload_dir, enriched):
             {
                 "frame_id": f"frame_{index:06d}",
                 "timestamp": 5.0 + index * 0.2,
-                "path": f"uploads/{JOB_ID}/frames/frame_{index:06d}.jpg",
-                "faces": ["person_001"],
+                "raw_path": f"uploads/{JOB_ID}/frames/frame_{index:06d}.jpg",
+                "annotated_path": f"uploads/{JOB_ID}/frames_annotated/frame_{index:06d}.jpg",
+                "faces": [{"person_id": "person_001", "bbox": [1, 2, 3, 4], "confidence": 0.9, "label_color": "red"}],
             }
             for index in range(10)
         ],
@@ -221,11 +253,12 @@ def test_merge_face_frames_includes_all_matching_frames(upload_dir, enriched):
     merged = merge_face_frames_into_segments(
         enriched_path,
         face_path,
+        max_frames_per_segment=3,
         save=False,
     )
 
     candidate = merged["segments"][2]
-    assert len(candidate["frames"]) == 10, "merge should include all matching frames"
+    assert len(candidate["frames"]) == 3, "merge should cap frames at max_frames_per_segment"
 
 
 def test_merge_face_frames_missing_when_no_matching_frames(upload_dir, enriched):
@@ -238,8 +271,9 @@ def test_merge_face_frames_missing_when_no_matching_frames(upload_dir, enriched)
             {
                 "frame_id": "frame_far",
                 "timestamp": 20.0,
-                "path": f"uploads/{JOB_ID}/frames/frame_far.jpg",
-                "faces": ["person_001"],
+                "raw_path": f"uploads/{JOB_ID}/frames/frame_far.jpg",
+                "annotated_path": f"uploads/{JOB_ID}/frames_annotated/frame_far.jpg",
+                "faces": [{"person_id": "person_001", "bbox": [1, 2, 3, 4], "confidence": 0.9, "label_color": "red"}],
             }
         ],
     }
@@ -252,12 +286,13 @@ def test_merge_face_frames_missing_when_no_matching_frames(upload_dir, enriched)
     merged = merge_face_frames_into_segments(
         enriched_path,
         face_path,
+        max_frames_per_segment=5,
         save=False,
     )
 
     candidate = merged["segments"][2]
     assert candidate["frames"] == []
-    assert candidate["visible_person_in_segment"] is None
+    assert candidate["persons"]["face_status"] == "missing"
 
 
 MOCK_FACE_SEGMENTS = {
@@ -278,9 +313,11 @@ MOCK_FACE_SEGMENTS = {
         {
             "timestamp": 5.5,
             "path": "annotated_frames/frame_5.50.jpg",
+            "visible_person_ids": ["person_001"],
             "faces": [
                 {
                     "person_id": "person_001",
+                    "color": "#EF4444",
                     "confidence": 0.94,
                     "bbox": {
                         "x": 0.21875,
@@ -294,14 +331,17 @@ MOCK_FACE_SEGMENTS = {
         {
             "timestamp": 6.0,
             "path": "annotated_frames/frame_6.00.jpg",
+            "visible_person_ids": [],
             "faces": [],
         },
         {
             "timestamp": 7.0,
             "path": "annotated_frames/frame_7.00.jpg",
+            "visible_person_ids": ["person_001"],
             "faces": [
                 {
                     "person_id": "person_001",
+                    "color": "#EF4444",
                     "confidence": 0.91,
                     "bbox": {
                         "x": 0.2240,
@@ -322,8 +362,13 @@ def test_adapt_face_segments_samples():
     assert len(adapted) == 3
     assert adapted[0]["frame_id"] == "frame_5.50"
     assert adapted[0]["timestamp"] == 5.5
-    assert adapted[0]["path"] == f"uploads/{JOB_ID}/annotated_frames/frame_5.50.jpg"
-    assert adapted[0]["faces"] == ["person_001"]
+    assert adapted[0]["annotated_path"] == (
+        f"uploads/{JOB_ID}/annotated_frames/frame_5.50.jpg"
+    )
+    assert adapted[0]["path"] == adapted[0]["annotated_path"]
+    assert adapted[0]["raw_path"] is None
+    assert adapted[0]["faces"][0]["label_color"] == "#EF4444"
+    assert adapted[0]["faces"][0]["bbox"] == [420, 68, 560, 174]
 
 
 def test_merge_face_segments_into_segments(upload_dir, enriched):
@@ -346,14 +391,16 @@ def test_merge_face_segments_into_segments(upload_dir, enriched):
     non_candidate = merged["segments"][0]
 
     assert non_candidate["frames"] == []
-    assert non_candidate["visible_person_in_segment"] is None
+    assert non_candidate["persons"]["face_status"] == "pending"
     assert len(candidate["frames"]) == 3
     assert candidate["start"] <= candidate["frames"][0]["timestamp"] <= candidate["end"]
-    assert candidate["frames"][0]["path"].startswith(f"uploads/{JOB_ID}/")
-    assert candidate["visible_person_in_segment"] == ["person_001"]
+    assert all(frame["selected"] is True for frame in candidate["frames"])
+    assert candidate["frames"][0]["annotated_path"].startswith(f"uploads/{JOB_ID}/")
+    assert candidate["persons"]["visible_person_ids"] == ["person_001"]
+    assert candidate["persons"]["face_status"] == "completed"
 
 
-def test_merge_face_segments_includes_all_matching_frames(upload_dir, enriched):
+def test_merge_face_segments_respects_max_frames(upload_dir, enriched):
     paths = JobPaths(JOB_ID)
     paths.job_dir.mkdir(parents=True, exist_ok=True)
 
@@ -363,9 +410,11 @@ def test_merge_face_segments_includes_all_matching_frames(upload_dir, enriched):
             {
                 "timestamp": 5.0 + index * 0.2,
                 "path": f"annotated_frames/frame_{5.0 + index * 0.2:.2f}.jpg",
+                "visible_person_ids": ["person_001"],
                 "faces": [
                     {
                         "person_id": "person_001",
+                        "color": "#EF4444",
                         "confidence": 0.9,
                         "bbox": {"x": 0.2, "y": 0.06, "w": 0.07, "h": 0.1},
                     }
@@ -384,10 +433,11 @@ def test_merge_face_segments_includes_all_matching_frames(upload_dir, enriched):
         enriched_path,
         face_path,
         job_id=JOB_ID,
+        max_frames_per_segment=3,
         save=False,
     )
 
-    assert len(merged["segments"][2]["frames"]) == 10
+    assert len(merged["segments"][2]["frames"]) == 3
 
 
 def test_merge_face_segments_missing_when_no_matching_samples(upload_dir, enriched):
@@ -400,9 +450,11 @@ def test_merge_face_segments_missing_when_no_matching_samples(upload_dir, enrich
             {
                 "timestamp": 20.0,
                 "path": "annotated_frames/frame_20.00.jpg",
+                "visible_person_ids": ["person_001"],
                 "faces": [
                     {
                         "person_id": "person_001",
+                        "color": "#EF4444",
                         "confidence": 0.9,
                         "bbox": {"x": 0.2, "y": 0.06, "w": 0.07, "h": 0.1},
                     }
@@ -425,7 +477,7 @@ def test_merge_face_segments_missing_when_no_matching_samples(upload_dir, enrich
 
     candidate = merged["segments"][2]
     assert candidate["frames"] == []
-    assert candidate["visible_person_in_segment"] is None
+    assert candidate["persons"]["face_status"] == "missing"
 
 
 def test_merge_face_segments_missing_file_is_noop(upload_dir, enriched):
@@ -442,7 +494,7 @@ def test_merge_face_segments_missing_file_is_noop(upload_dir, enriched):
         save=False,
     )
 
-    assert merged["segments"][2]["visible_person_in_segment"] is None
+    assert merged["segments"][2]["persons"]["face_status"] == "pending"
     assert merged["segments"][2]["frames"] == []
 
 
@@ -457,4 +509,4 @@ def test_try_merge_face_segments_for_job(upload_dir, enriched):
     assert try_merge_face_segments_for_job(JOB_ID) is True
 
     merged = read_json(paths.segments_enriched_json)
-    assert merged["segments"][2]["visible_person_in_segment"] == ["person_001"]
+    assert merged["segments"][2]["persons"]["face_status"] == "completed"

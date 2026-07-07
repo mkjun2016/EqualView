@@ -1,16 +1,17 @@
 from pathlib import Path
 from typing import Any
 
-from config import ANNOTATED_FRAME_INTERVAL_SECONDS
 from utils.json_io import atomic_write_json, read_json
 from utils.paths import JobPaths
 
 DEFAULT_SETTINGS = {
     "narration_min_duration": 3.0,
-    "frame_interval": ANNOTATED_FRAME_INTERVAL_SECONDS,
+    "frame_interval": 0.5,
+    "max_frames_per_segment": 5,
     "language": "ko",
     "pipeline_version": "mvp2",
 }
+
 
 def _segment_id(index: int) -> str:
     return f"seg_{index + 1:04d}"
@@ -20,6 +21,31 @@ def _audio_type(raw_segment: dict[str, Any]) -> str:
     if raw_segment.get("type") == "speech":
         return "speech"
     return "non_speech"
+
+
+def _default_sound_category(raw_segment: dict[str, Any], audio_type: str) -> str:
+    existing = raw_segment.get("sound_category")
+    if existing:
+        return existing
+    if audio_type == "speech":
+        return "human_speech"
+    return "silence_or_background"
+
+
+def _candidate_reason(audio_type: str, duration: float, min_duration: float) -> str:
+    if audio_type == "speech":
+        return "speech_segment"
+    if duration >= min_duration:
+        return "non_speech_duration_over_3s"
+    return "duration_under_3s"
+
+
+def _empty_persons() -> dict[str, Any]:
+    return {
+        "visible_person_ids": [],
+        "main_person_id": None,
+        "face_status": "pending",
+    }
 
 
 def _build_enriched_segment(
@@ -34,6 +60,7 @@ def _build_enriched_segment(
     narration_candidate = audio_type == "non_speech" and duration >= min_duration
 
     text = raw_segment.get("text") or ""
+    speaker = "unknown" if audio_type == "speech" else None
 
     return {
         "segment_id": _segment_id(index),
@@ -41,8 +68,12 @@ def _build_enriched_segment(
         "end": end,
         "duration": duration,
         "audio_type": audio_type,
+        "sound_category": _default_sound_category(raw_segment, audio_type),
+        "speaker": speaker,
         "text": text,
         "narration_candidate": narration_candidate,
+        "candidate_reason": _candidate_reason(audio_type, duration, min_duration),
+        "duration_limit": duration,
         "context": {
             "previous_speech": None,
             "next_speech": None,
@@ -50,7 +81,7 @@ def _build_enriched_segment(
             "next_segment_id": None,
         },
         "frames": [],
-        "visible_person_in_segment": None,
+        "persons": _empty_persons(),
         "scene_analysis": None,
         "generated_narration": None,
         "tts": None,
@@ -148,55 +179,68 @@ def save_segments_enriched(job_id: str, enriched: dict[str, Any]) -> Path:
     return path
 
 
-def _face_person_ids(faces: list[Any]) -> list[str]:
-    person_ids: list[str] = []
+def _adapt_face_segments_face(
+    face: dict[str, Any],
+    frame_width: int,
+    frame_height: int,
+) -> dict[str, Any]:
+    bbox = face.get("bbox")
+    pixel_bbox: list[int] = []
 
-    for face in faces:
-        person_id = face if isinstance(face, str) else face.get("person_id")
-        if person_id and person_id not in person_ids:
-            person_ids.append(person_id)
+    if isinstance(bbox, dict) and frame_width > 0 and frame_height > 0:
+        pixel_bbox = [
+            round(float(bbox["x"]) * frame_width),
+            round(float(bbox["y"]) * frame_height),
+            round((float(bbox["x"]) + float(bbox["w"])) * frame_width),
+            round((float(bbox["y"]) + float(bbox["h"])) * frame_height),
+        ]
+    elif isinstance(bbox, list):
+        pixel_bbox = [int(value) for value in bbox]
 
-    return person_ids
+    return {
+        "person_id": face.get("person_id"),
+        "bbox": pixel_bbox,
+        "confidence": face.get("confidence"),
+        "label_color": face.get("color") or face.get("label_color"),
+    }
 
 
 def adapt_face_segments_samples(
     face_data: dict[str, Any],
     job_id: str,
 ) -> list[dict[str, Any]]:
+    source = face_data.get("source") or {}
+    frame_width = int(source.get("width") or 0)
+    frame_height = int(source.get("height") or 0)
+
     adapted: list[dict[str, Any]] = []
 
     for sample in face_data.get("samples") or []:
         relative_path = sample["path"]
         frame_id = Path(relative_path).stem
-        frame_path = _job_relative_path(job_id, relative_path)
+        annotated_path = _job_relative_path(job_id, relative_path)
 
         adapted.append(
             {
                 "frame_id": frame_id,
                 "timestamp": float(sample["timestamp"]),
-                "path": frame_path,
-                "faces": _face_person_ids(sample.get("faces") or []),
+                "path": annotated_path,
+                "raw_path": None,
+                "annotated_path": annotated_path,
+                "faces": [
+                    _adapt_face_segments_face(face, frame_width, frame_height)
+                    for face in sample.get("faces") or []
+                ],
             }
         )
 
     return adapted
 
 
-def _adapt_face_frames(frames: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return [
-        {
-            "frame_id": frame["frame_id"],
-            "timestamp": float(frame["timestamp"]),
-            "path": frame.get("path") or "",
-            "faces": _face_person_ids(frame.get("faces") or []),
-        }
-        for frame in frames
-    ]
-
-
 def _apply_face_frames_to_segments(
     enriched: dict[str, Any],
     all_frames: list[dict[str, Any]],
+    max_frames_per_segment: int,
 ) -> dict[str, Any]:
     for segment in enriched.get("segments", []):
         if not segment.get("narration_candidate"):
@@ -210,24 +254,69 @@ def _apply_face_frames_to_segments(
             if start <= float(frame["timestamp"]) <= end
         ]
 
-        chosen_frames = sorted(matching, key=lambda frame: frame["timestamp"])
-        segment["frames"] = chosen_frames
+        selected_frames = _select_frames_for_segment(
+            matching,
+            start,
+            end,
+            max_frames_per_segment,
+        )
+        segment["frames"] = selected_frames
 
         person_ids: list[str] = []
-        for frame in chosen_frames:
-            for person_id in frame.get("faces") or []:
+        for frame in selected_frames:
+            for face in frame.get("faces") or []:
+                person_id = face.get("person_id")
                 if person_id and person_id not in person_ids:
                     person_ids.append(person_id)
 
-        segment["visible_person_in_segment"] = person_ids or None
+        segment["persons"]["visible_person_ids"] = person_ids
+        segment["persons"]["main_person_id"] = person_ids[0] if person_ids else None
+        segment["persons"]["face_status"] = (
+            "completed" if selected_frames else "missing"
+        )
 
     return enriched
+
+
+def _select_frames_for_segment(
+    frames: list[dict[str, Any]],
+    segment_start: float,
+    segment_end: float,
+    max_frames: int,
+) -> list[dict[str, Any]]:
+    if not frames or max_frames <= 0:
+        return []
+
+    sorted_frames = sorted(frames, key=lambda frame: frame["timestamp"])
+    if len(sorted_frames) <= max_frames:
+        return [{**frame, "selected": True} for frame in sorted_frames]
+
+    target_times = [segment_start, (segment_start + segment_end) / 2, segment_end]
+    if max_frames > 3:
+        step = (segment_end - segment_start) / (max_frames - 1)
+        target_times = [segment_start + step * i for i in range(max_frames)]
+
+    selected: list[dict[str, Any]] = []
+    used_ids: set[str] = set()
+
+    for target in target_times[:max_frames]:
+        candidates = [
+            frame for frame in sorted_frames if frame["frame_id"] not in used_ids
+        ]
+        if not candidates:
+            break
+        best = min(candidates, key=lambda frame: abs(frame["timestamp"] - target))
+        used_ids.add(best["frame_id"])
+        selected.append({**best, "selected": True})
+
+    return sorted(selected, key=lambda frame: frame["timestamp"])
 
 
 def merge_face_segments_into_segments(
     segments_enriched_path: str | Path,
     face_segments_path: str | Path,
     job_id: str | None = None,
+    max_frames_per_segment: int | None = None,
     save: bool = True,
 ) -> dict[str, Any]:
     enriched_path = Path(segments_enriched_path)
@@ -239,9 +328,17 @@ def merge_face_segments_into_segments(
 
     face_data = read_json(face_path)
     resolved_job_id = job_id or enriched.get("job_id") or enriched_path.parent.name
+    max_frames = max_frames_per_segment
+    if max_frames is None:
+        max_frames = int(
+            enriched.get("settings", {}).get(
+                "max_frames_per_segment",
+                DEFAULT_SETTINGS["max_frames_per_segment"],
+            )
+        )
 
     all_frames = adapt_face_segments_samples(face_data, resolved_job_id)
-    enriched = _apply_face_frames_to_segments(enriched, all_frames)
+    enriched = _apply_face_frames_to_segments(enriched, all_frames, max_frames)
 
     if save:
         atomic_write_json(enriched_path, enriched)
@@ -269,6 +366,7 @@ def try_merge_face_segments_for_job(job_id: str) -> bool:
 def merge_face_frames_into_segments(
     segments_enriched_path: str | Path,
     face_frames_path: str | Path,
+    max_frames_per_segment: int = 5,
     save: bool = True,
 ) -> dict[str, Any]:
     enriched_path = Path(segments_enriched_path)
@@ -279,11 +377,12 @@ def merge_face_frames_into_segments(
         return enriched
 
     face_data = read_json(face_path)
-    all_frames = _adapt_face_frames(face_data.get("frames") or [])
+    all_frames = face_data.get("frames") or []
 
     enriched = _apply_face_frames_to_segments(
         enriched,
         all_frames,
+        max_frames_per_segment,
     )
 
     if save:

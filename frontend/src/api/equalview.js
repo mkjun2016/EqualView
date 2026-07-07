@@ -45,7 +45,7 @@ export async function getJobSegmentsEnriched(jobId) {
 }
 
 export function getAnnotatedFrameUrl(jobId, frame) {
-  const path = frame?.path || ''
+  const path = frame?.annotated_path || frame?.path || ''
   const filename = path.split('/').pop()
   if (!jobId || !filename) return null
   return `${BASE}/jobs/${jobId}/frames/${encodeURIComponent(filename)}`
@@ -56,7 +56,7 @@ export function collectPreviewFrames(enrichedResult) {
 
   for (const segment of enrichedResult?.segments ?? []) {
     for (const frame of segment.frames ?? []) {
-      if (!frame?.path) continue
+      if (!frame?.annotated_path && !frame?.path) continue
 
       previews.push({
         ...frame,
@@ -135,7 +135,7 @@ const PROCESSING_TITLES = [
 ]
 
 function statusToStepState(status) {
-  if (status === 'COMPLETED') return 'completed'
+  if (status === 'COMPLETED' || status === 'PARTIAL') return 'completed'
   if (status === 'FAILED') return 'failed'
   if (status === 'PROCESSING') return 'in-progress'
   return 'waiting'

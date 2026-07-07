@@ -377,7 +377,8 @@ function App() {
 				if (
 					job.status === "COMPLETED" &&
 					job.face_status === "COMPLETED" &&
-					job.narration_status === "COMPLETED" &&
+					(job.narration_status === "COMPLETED" ||
+						job.narration_status === "PARTIAL") &&
 					job.combine_status === "COMPLETED"
 				) {
 					const [segData, enrichedData] = await Promise.allSettled([

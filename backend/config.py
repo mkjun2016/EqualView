@@ -10,6 +10,10 @@ UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", str(BASE_DIR / "uploads")))
 
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 
+CELERY_WORKER_CONCURRENCY = int(
+    os.getenv("CELERY_WORKER_CONCURRENCY", "2")
+)
+
 FACE_MODEL_NAME = os.getenv("FACE_MODEL_NAME", "buffalo_l")
 FACE_MODEL_ROOT = Path(
     os.getenv("FACE_MODEL_ROOT", str(BASE_DIR / "models"))
@@ -18,7 +22,7 @@ FACE_MODEL_ROOT = Path(
 FACE_CTX_ID = int(os.getenv("FACE_CTX_ID", "-1"))
 FACE_PROVIDERS = os.getenv("FACE_PROVIDERS", "auto")
 
-FACE_DET_SIZE_VALUE = int(os.getenv("FACE_DET_SIZE", "640"))
+FACE_DET_SIZE_VALUE = int(os.getenv("FACE_DET_SIZE", "320"))
 FACE_DET_SIZE = (FACE_DET_SIZE_VALUE, FACE_DET_SIZE_VALUE)
 
 FACE_DET_THRESHOLD = float(os.getenv("FACE_DET_THRESHOLD", "0.60"))
@@ -36,8 +40,16 @@ FACE_ID_PROTOTYPE_ADD_THRESHOLD = float(
 )
 
 ANNOTATED_FRAME_INTERVAL_SECONDS = float(
-    os.getenv("ANNOTATED_FRAME_INTERVAL_SECONDS", "0.51")
+    os.getenv("ANNOTATED_FRAME_INTERVAL_SECONDS", "1.5")
 )
+
+FACE_RANGE_PADDING_SECONDS = float(
+    os.getenv("FACE_RANGE_PADDING_SECONDS", "0.5")
+)
+
+FACE_WARMUP_ON_WORKER_START = os.getenv(
+    "FACE_WARMUP_ON_WORKER_START", "true"
+).lower() in {"1", "true", "yes", "on"}
 
 FACE_FRAME_SIMILARITY_THRESHOLD = float(
     os.getenv("FACE_FRAME_SIMILARITY_THRESHOLD", "0.91")
@@ -59,7 +71,35 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 
 NARRATION_FRAMES_PER_SEGMENT = int(
-    os.getenv("NARRATION_FRAMES_PER_SEGMENT", "5")
+    os.getenv("NARRATION_FRAMES_PER_SEGMENT", "3")
+)
+
+NARRATION_MAX_CONCURRENCY = int(
+    os.getenv("NARRATION_MAX_CONCURRENCY", "3")
+)
+
+NARRATION_MAX_RETRIES = int(
+    os.getenv("NARRATION_MAX_RETRIES", "4")
+)
+
+NARRATION_RETRY_BASE_SECONDS = float(
+    os.getenv("NARRATION_RETRY_BASE_SECONDS", "2.0")
+)
+
+NARRATION_RETRY_MAX_SECONDS = float(
+    os.getenv("NARRATION_RETRY_MAX_SECONDS", "30.0")
+)
+
+NARRATION_REQUEST_STAGGER_SECONDS = float(
+    os.getenv("NARRATION_REQUEST_STAGGER_SECONDS", "0.75")
+)
+
+NARRATION_FRAME_MAX_PX = int(
+    os.getenv("NARRATION_FRAME_MAX_PX", "512")
+)
+
+NARRATION_JPEG_QUALITY = int(
+    os.getenv("NARRATION_JPEG_QUALITY", "80")
 )
 
 TTS_VOICE = os.getenv("TTS_VOICE", "ko-KR-SunHiNeural")

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any
+import colorsys
 
 # numpy: 얼굴 특징 벡터 계산
 import numpy as np
@@ -84,6 +85,23 @@ def _resolve_face_ctx_id(providers: list[str]) -> int:
     return -1
 
 
+# 각 person_id에 순서대로 할당할 테두리 색상
+GOLDEN_RATIO_CONJUGATE = 0.618033988749895
+
+
+def assign_person_color(index: int) -> str:
+    hue = (index * GOLDEN_RATIO_CONJUGATE) % 1.0
+    saturation = 0.82 if index % 2 == 0 else 0.95
+    value = 0.95 if (index // 2) % 2 == 0 else 0.78
+
+    red, green, blue = colorsys.hsv_to_rgb(hue, saturation, value)
+
+    return (
+        f"#{round(red * 255):02X}"
+        f"{round(green * 255):02X}"
+        f"{round(blue * 255):02X}"
+    )
+
 # 중요한 점은 Celery worker가 여러 개라면 각 worker 프로세스가 자기 모델을 하나씩 로드한다는 것입니다.
 def get_face_analyzer() -> FaceAnalysis:
     """
@@ -111,6 +129,18 @@ def get_face_analyzer() -> FaceAnalysis:
     return _face_analyzer
 
 
+def warmup_face_analyzer() -> None:
+    """
+    Worker 기동 시 InsightFace를 미리 로드해 첫 Face job의 cold start를 줄인다.
+    """
+    analyzer = get_face_analyzer()
+    dummy = np.zeros(
+        (FACE_DET_SIZE[0], FACE_DET_SIZE[0], 3),
+        dtype=np.uint8,
+    )
+    analyzer.get(dummy)
+
+
 def normalize_embedding(embedding: np.ndarray) -> np.ndarray:
     """
     얼굴 특징 벡터의 길이를 1로 맞춘다.
@@ -128,6 +158,7 @@ def normalize_embedding(embedding: np.ndarray) -> np.ndarray:
 @dataclass
 class PersonIdentity:
     person_id: str
+    color: str
     embedding: np.ndarray
     first_seen: float
     last_seen: float
@@ -239,6 +270,7 @@ class FaceTracker:
                     results.append(
                         self._build_detection_result(
                             person_id="unknown",
+                            color="#000000",
                             confidence=face.det_score,
                             x1=x1,
                             y1=y1,
@@ -260,6 +292,7 @@ class FaceTracker:
             results.append(
                 self._build_detection_result(
                     person_id=identity.person_id,
+                    color=identity.color,
                     confidence=face.det_score,
                     x1=x1,
                     y1=y1,
@@ -307,6 +340,7 @@ class FaceTracker:
     def _build_detection_result(
         self,
         person_id: str,
+        color: str,
         confidence: float,
         x1: float,
         y1: float,
@@ -317,6 +351,7 @@ class FaceTracker:
     ) -> dict[str, Any]:
         return {
             "person_id": person_id,
+            "color": color,
             "confidence": round(float(confidence), 4),
             "bbox": {
                 "x": round(x1 / frame_width, 6),
@@ -368,6 +403,7 @@ class FaceTracker:
 
         identity = PersonIdentity(
             person_id=f"person_{number:03d}",
+            color=assign_person_color(number - 1),
             embedding=embedding,
             first_seen=timestamp,
             last_seen=timestamp,
@@ -384,6 +420,7 @@ class FaceTracker:
         return [
             {
                 "person_id": identity.person_id,
+                "color": identity.color,
                 "first_seen": round(identity.first_seen, 3),
                 "last_seen": round(identity.last_seen, 3),
                 "detection_count": identity.detection_count,

@@ -7,7 +7,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from utils.ffmpeg_paths import get_ffmpeg_binary, probe_media_info, subprocess_run
+from pipeline.audio_extractor import get_media_duration
+from utils.ffmpeg_paths import get_ffmpeg_binary, subprocess_run
 from utils.json_io import read_json
 from utils.paths import JobPaths
 
@@ -43,9 +44,9 @@ def run_synthesis(job_id: str) -> dict[str, Any]:
         input_index = index + 2
 
         available = max(0.1, segment["end"] - segment["start"])
-        tts_duration = segment.get("narration_audio_duration") or probe_media_info(
+        tts_duration = segment.get("narration_audio_duration") or get_media_duration(
             narration_path
-        ).duration
+        )
         tempo = min(MAX_ATEMPO, max(MIN_ATEMPO, tts_duration / available))
         delay_ms = round(segment["start"] * 1000)
 
