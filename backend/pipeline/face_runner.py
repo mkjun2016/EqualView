@@ -118,7 +118,9 @@ def run_face_analysis(
                     similarity_skipped_count += 1
                     continue
 
-            faces = tracker.detect(frame)
+            faces = tracker.detect(frame) 
+
+
             detections = tracker.assign_faces(
                 faces=faces,
                 timestamp=actual_timestamp,
@@ -150,7 +152,6 @@ def run_face_analysis(
                     "faces": [
                         {
                             "person_id": detection["person_id"],
-                            "color": detection["color"],
                             "confidence": detection["confidence"],
                             "bbox": detection["bbox"],
                         }
@@ -249,7 +250,6 @@ def _build_face_segments_result(
             "analyzed_ranges": analyzed_ranges,
             "sampling_mode": "ffmpeg_seek",
         },
-        "identities": tracker.get_identities(),
         "samples": samples,
     }
 

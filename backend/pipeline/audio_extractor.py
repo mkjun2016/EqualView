@@ -36,7 +36,7 @@ def get_media_duration(file_path: Path):
 
 
 def has_audio_stream(video_path: Path):
-    return probe_media_info(file_path).has_audio
+    return probe_media_info(video_path).has_audio
 
 
 def create_silent_wav(audio_path: Path, duration: float):

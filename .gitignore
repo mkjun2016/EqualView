@@ -44,3 +44,12 @@ backend/venv/
 frontend/node_modules/
 **/__pycache__/
 *.pyc
+
+# ML / downloaded model weights
+backend/models/models/
+*.onnx
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+*.bin
