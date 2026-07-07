@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import "./App.css";
 import {
+	collectPreviewFrames,
 	createJob,
 	createJobPollSnapshot,
 	deriveProcessingSteps,
@@ -458,22 +459,7 @@ function App() {
 	const speechCount = segments.filter((segment) => segment.speech === true).length;
 	const silenceCount = segments.filter((segment) => segment.speech === false).length;
 
-	const previewFrames = enrichedResult
-		? (() => {
-				const previews = [];
-				for (const seg of enrichedResult?.segments ?? []) {
-					for (const frame of seg.frames ?? []) {
-						if (!frame?.annotated_path && !frame?.path) continue;
-						previews.push({
-							...frame,
-							segmentId: seg.segment_id,
-							personIds: (frame.faces ?? []).map((f) => f.person_id).filter(Boolean),
-						});
-					}
-				}
-				return previews.sort((a, b) => a.timestamp - b.timestamp);
-			})()
-		: [];
+	const previewFrames = enrichedResult ? collectPreviewFrames(enrichedResult) : [];
 
 	return (
 		<div className="app">

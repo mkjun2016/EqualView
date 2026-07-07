@@ -5,11 +5,10 @@ import json
 import asyncio
 
 from utils.json_io import to_json_safe
+from utils.ffmpeg_paths import probe_media_info
 from pipeline.audio_extractor import (
     extract_audio_from_video,
-    get_media_duration,
-    has_audio_stream,
-    create_silent_wav
+    create_silent_wav,
 )
 
 from pipeline.transcriber import transcribe_audio, build_segments_from_words
@@ -41,9 +40,9 @@ async def extract_audio(video: UploadFile = File(...)):
     with open(video_path, "wb") as f:
         f.write(contents)
 
-    video_duration = get_media_duration(video_path)
-
-    audio_exists = has_audio_stream(video_path)
+    media_info = probe_media_info(video_path)
+    video_duration = media_info.duration
+    audio_exists = media_info.has_audio
 
     if audio_exists:
         extract_audio_from_video(video_path, audio_path)

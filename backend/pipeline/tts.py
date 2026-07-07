@@ -10,7 +10,7 @@ from typing import Any
 import edge_tts
 
 from config import TTS_VOICE
-from pipeline.audio_extractor import get_media_duration
+from utils.ffmpeg_paths import probe_media_info
 from utils.json_io import atomic_write_json, read_json
 from utils.paths import JobPaths
 
@@ -47,7 +47,7 @@ def run_tts(job_id: str) -> dict[str, Any]:
             _synthesize(text, output_path)
             segment["narration_audio"] = f"narration_audio/{filename}"
             segment["narration_audio_duration"] = round(
-                get_media_duration(output_path), 2
+                probe_media_info(output_path).duration, 2
             )
             synthesized_count += 1
         except Exception as exc:
