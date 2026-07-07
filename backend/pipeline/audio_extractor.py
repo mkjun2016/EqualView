@@ -2,9 +2,6 @@ from pathlib import Path
 
 from utils.ffmpeg_paths import (
     get_ffmpeg_binary,
-    has_audio_in_probe,
-    parse_duration,
-    probe_media,
     subprocess_run,
 )
 
@@ -31,16 +28,6 @@ def extract_audio_from_video(video_path: Path, audio_path: Path):
 
     if result.returncode != 0:
         raise RuntimeError(result.stderr)
-
-
-def get_media_duration(file_path: Path):
-    stderr = probe_media(file_path)
-    return parse_duration(stderr)
-
-
-def has_audio_stream(video_path: Path):
-    stderr = probe_media(video_path)
-    return has_audio_in_probe(stderr)
 
 
 def create_silent_wav(audio_path: Path, duration: float):

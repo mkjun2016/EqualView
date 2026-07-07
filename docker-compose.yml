@@ -28,6 +28,7 @@ services:
       redis:
         condition: service_healthy
 
+
   worker:
     build:
       context: ./backend
@@ -37,6 +38,8 @@ services:
     environment:
       REDIS_URL: redis://redis:6379/0
       UPLOAD_DIR: /app/uploads
+
+
       HF_HOME: /root/.cache/huggingface
     volumes:
       - uploads_data:/app/uploads

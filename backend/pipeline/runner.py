@@ -1,11 +1,11 @@
 import time
+from dataclasses import dataclass
+from pathlib import Path
 
 from services.job_store import JobStore
 from pipeline.audio_extractor import (
     create_silent_wav,
     extract_audio_from_video,
-    get_media_duration,
-    has_audio_stream,
 )
 from pipeline.segment_enricher import (
     build_segments_enriched,
@@ -13,9 +13,34 @@ from pipeline.segment_enricher import (
     try_merge_face_segments_for_job,
 )
 from pipeline.transcriber import build_segments_from_words, transcribe_audio
-from utils.ffmpeg_paths import get_video_metadata
+from utils.ffmpeg_paths import MediaProbeInfo, probe_media_info
 from utils.json_io import atomic_write_json
 from utils.paths import JobPaths
+
+
+@dataclass(frozen=True)
+class AnalysisContext:
+    video_path: Path
+    media_info: MediaProbeInfo
+
+    @classmethod
+    def from_video(cls, video_path: Path):
+        return cls(
+            video_path=video_path,
+            media_info=probe_media_info(video_path),
+        )
+
+    @property
+    def duration(self) -> float:
+        return self.media_info.duration
+
+    @property
+    def has_audio(self) -> bool:
+        return self.media_info.has_audio
+
+    @property
+    def video_metadata(self):
+        return self.media_info.metadata
 
 
 def run_analysis(job_id: str, store: JobStore) -> dict:
@@ -33,8 +58,7 @@ def run_analysis(job_id: str, store: JobStore) -> dict:
         current_step="영상 분석 작업 시작",
     )
 
-    video_duration = get_media_duration(video_path)
-    audio_exists = has_audio_stream(video_path)
+    context = AnalysisContext.from_video(video_path)
 
     store.update(
         job_id,
@@ -42,10 +66,10 @@ def run_analysis(job_id: str, store: JobStore) -> dict:
         current_step="오디오 추출 중",
     )
 
-    if audio_exists:
+    if context.has_audio:
         extract_audio_from_video(video_path, audio_path)
     else:
-        create_silent_wav(audio_path, video_duration)
+        create_silent_wav(audio_path, context.duration)
 
     store.update(
         job_id,
@@ -53,7 +77,7 @@ def run_analysis(job_id: str, store: JobStore) -> dict:
         current_step="Whisper 전사 중",
     )
 
-    if audio_exists:
+    if context.has_audio:
         script_result = transcribe_audio(audio_path)
         words = script_result["words"]
         language = script_result.get("language")
@@ -67,16 +91,19 @@ def run_analysis(job_id: str, store: JobStore) -> dict:
         current_step="침묵 구간 분석 중",
     )
 
-    segments = build_segments_from_words(words, video_duration, audio_exists)
+    segments = build_segments_from_words(
+        words,
+        context.duration,
+        context.has_audio,
+    )
 
     atomic_write_json(segments_path, {"segments": segments})
 
-    video_metadata = get_video_metadata(video_path)
     enriched = build_segments_enriched(
         job_id=job_id,
         raw_segments=segments,
         video_path=video_path,
-        video_metadata=video_metadata,
+        video_metadata=context.video_metadata,
         language=language,
     )
     save_segments_enriched(job_id, enriched)
@@ -92,8 +119,8 @@ def run_analysis(job_id: str, store: JobStore) -> dict:
     )
 
     return {
-        "duration": round(video_duration, 2),
-        "has_audio": audio_exists,
+        "duration": round(context.duration, 2),
+        "has_audio": context.has_audio,
         "segment_count": len(segments),
         "narration_candidate_count": enriched["summary"]["narration_candidate_count"],
     }

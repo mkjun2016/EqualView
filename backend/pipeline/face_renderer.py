@@ -12,26 +12,13 @@ import cv2
 import numpy as np
 
 
-def hex_to_bgr(hex_color: str) -> tuple[int, int, int]:
-    """
-    '#EF4444' 형식의 색상을 OpenCV용 BGR 형식으로 바꾼다.
-    """
-    value = hex_color.lstrip("#")
-
-    red = int(value[0:2], 16)
-    green = int(value[2:4], 16)
-    blue = int(value[4:6], 16)
-
-    return blue, green, red
-
-
 def draw_face_annotations(
     frame: np.ndarray,
     detections: list[dict[str, Any]],
 ) -> np.ndarray:
     """
     원본 프레임을 복사한 뒤,
-    얼굴별 색 테두리와 person_id 라벨을 그려 반환한다.
+    얼굴별 빨간색 테두리와 person_id 라벨을 그려 반환한다.
     """
     annotated = frame.copy()
     frame_height, frame_width = annotated.shape[:2]

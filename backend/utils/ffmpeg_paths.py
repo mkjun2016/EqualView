@@ -1,6 +1,7 @@
 import os
 import re
 import shutil
+from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -8,6 +9,24 @@ from typing import Any
 
 class FFmpegNotFoundError(RuntimeError):
     pass
+
+
+@dataclass(frozen=True)
+class MediaProbeInfo:
+    duration: float
+    has_audio: bool
+    metadata: dict[str, Any]
+    stderr: str
+
+
+@dataclass(frozen=True)
+class _MediaProbeCacheEntry:
+    mtime_ns: int
+    size: int
+    info: MediaProbeInfo
+
+
+_MEDIA_PROBE_CACHE: dict[str, _MediaProbeCacheEntry] = {}
 
 
 @lru_cache(maxsize=1)
@@ -116,8 +135,31 @@ def parse_video_metadata(stderr: str, duration: float | None = None) -> dict[str
     return result
 
 
-def get_video_metadata(file_path: Path) -> dict[str, Any]:
-    stderr = probe_media(file_path)
+def probe_media_info(file_path: Path) -> MediaProbeInfo:
+    path = Path(file_path).resolve()
+    stat = path.stat()
+    cache_key = str(path)
+    cached = _MEDIA_PROBE_CACHE.get(cache_key)
+
+    if (
+        cached is not None
+        and cached.mtime_ns == stat.st_mtime_ns
+        and cached.size == stat.st_size
+    ):
+        return cached.info
+
+    stderr = probe_media(path)
     duration = parse_duration(stderr)
-    metadata = parse_video_metadata(stderr, duration=duration)
-    return metadata
+
+    info = MediaProbeInfo(
+        duration=duration,
+        has_audio=has_audio_in_probe(stderr),
+        metadata=parse_video_metadata(stderr, duration=duration),
+        stderr=stderr,
+    )
+    _MEDIA_PROBE_CACHE[cache_key] = _MediaProbeCacheEntry(
+        mtime_ns=stat.st_mtime_ns,
+        size=stat.st_size,
+        info=info,
+    )
+    return info

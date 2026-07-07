@@ -14,7 +14,7 @@ from pipeline.face_renderer import (
     save_annotated_frame,
 )
 from pipeline.face_tracker import FaceTracker
-from pipeline.audio_extractor import get_media_duration
+from utils.ffmpeg_paths import probe_media_info
 from utils.json_io import atomic_write_json
 from utils.paths import JobPaths
 
@@ -47,7 +47,7 @@ def run_face_analysis(job_id: str) -> dict[str, Any]:
         raise RuntimeError("Video has invalid dimensions.")
 
     try:
-        duration = get_media_duration(input_video)
+        duration = probe_media_info(input_video).duration
     except Exception:
         duration = (
             reported_frame_count / fps
@@ -99,7 +99,9 @@ def run_face_analysis(job_id: str) -> dict[str, Any]:
                     similarity_skipped_count += 1
                     continue
 
-            faces = tracker.detect(frame)
+            faces = tracker.detect(frame) 
+
+
             detections = tracker.assign_faces(
                 faces=faces,
                 timestamp=timestamp,
@@ -131,7 +133,6 @@ def run_face_analysis(job_id: str) -> dict[str, Any]:
                     "faces": [
                         {
                             "person_id": detection["person_id"],
-                            "color": detection["color"],
                             "confidence": detection["confidence"],
                             "bbox": detection["bbox"],
                         }
@@ -180,7 +181,6 @@ def run_face_analysis(job_id: str) -> dict[str, Any]:
             ),
             "duration_gap": round(duration_gap, 3),
         },
-        "identities": tracker.get_identities(),
         "samples": samples,
     }
 
