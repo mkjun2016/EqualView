@@ -107,10 +107,26 @@ def _run_post_processing_if_ready(job_id: str) -> None:
         )
         return
 
+    narration_status = narrator.resolve_narration_status(narration_result)
+    narration_error = None
+
+    if narration_status == "FAILED":
+        narration_error = (
+            f"Gemini narration failed for all "
+            f"{narration_result.get('narration_job_count', 0)} segments."
+        )
+    elif narration_status == "PARTIAL":
+        narration_error = (
+            f"Gemini narration failed for "
+            f"{narration_result.get('failed_segment_count', 0)} of "
+            f"{narration_result.get('narration_job_count', 0)} segments."
+        )
+
     job_store.update(
         job_id,
-        narration_status="COMPLETED",
+        narration_status=narration_status,
         narration_result=narration_result,
+        narration_error=narration_error,
         narration_seconds=round(time.monotonic() - narration_started_at, 2),
         combine_status="PROCESSING",
         current_step="화면해설 음성 합성 중",

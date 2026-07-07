@@ -87,7 +87,7 @@ def test_prepare_narration_jobs_builds_prompts(job_paths):
         },
     ]
 
-    jobs = narrator._prepare_narration_jobs(segments, samples, job_paths.job_dir)
+    jobs = narrator._prepare_narration_jobs(segments, samples, job_paths.job_dir, 100.0)
 
     assert len(jobs) == 1
     assert jobs[0].frame_paths == [frame_a, frame_b]
@@ -112,7 +112,8 @@ def test_read_frame_jpeg_bytes_resizes_large_image(job_paths, monkeypatch):
     assert max(decoded.shape[:2]) <= 512
 
 
-def test_execute_narration_jobs_runs_in_parallel(job_paths):
+def test_execute_narration_jobs_runs_in_parallel(job_paths, monkeypatch):
+    monkeypatch.setattr(narrator, "NARRATION_REQUEST_STAGGER_SECONDS", 0)
     frame_a = job_paths.job_dir / "a.jpg"
     frame_b = job_paths.job_dir / "b.jpg"
     _write_sample_frame(frame_a, (1, 2, 3))
@@ -187,7 +188,101 @@ def test_run_narration_writes_segments_json(job_paths):
     saved = read_json(job_paths.segments_json)
 
     assert result == {
+        "narration_job_count": 1,
         "narrated_segment_count": 1,
         "failed_segment_count": 0,
     }
     assert saved["segments"][0]["narration"] == "어두운 방 안, 한 남자가 창밖을 바라본다."
+
+
+def test_frame_selection_range_uses_face_padding():
+    start, end = narrator._frame_selection_range(
+        {"start": 66.8, "end": 70.2},
+        video_duration=100.0,
+    )
+
+    assert start == 66.3
+    assert end == 70.7
+
+
+def test_prepare_narration_jobs_uses_padded_frame_range(job_paths):
+    frame_path = job_paths.annotated_frames_dir / "frame_66.30.jpg"
+    _write_sample_frame(frame_path, (50, 50, 50))
+
+    segments = [
+        {
+            "start": 66.8,
+            "end": 70.2,
+            "speech": False,
+            "narration_safe": True,
+            "text": "",
+        },
+    ]
+    samples = [
+        {
+            "timestamp": 66.3,
+            "path": "annotated_frames/frame_66.30.jpg",
+            "visible_person_ids": [],
+        },
+    ]
+
+    jobs = narrator._prepare_narration_jobs(
+        segments,
+        samples,
+        job_paths.job_dir,
+        video_duration=100.0,
+    )
+
+    assert len(jobs) == 1
+    assert segments[0]["frames"] == ["annotated_frames/frame_66.30.jpg"]
+
+
+def test_generate_narration_retries_transient_errors(job_paths, monkeypatch):
+    frame_path = job_paths.annotated_frames_dir / "frame.jpg"
+    _write_sample_frame(frame_path, (1, 2, 3))
+    monkeypatch.setattr(narrator, "NARRATION_MAX_RETRIES", 2)
+    monkeypatch.setattr(narrator, "NARRATION_RETRY_BASE_SECONDS", 0.01)
+    monkeypatch.setattr(narrator, "NARRATION_RETRY_MAX_SECONDS", 0.05)
+
+    client = MagicMock()
+    client.models.generate_content.side_effect = [
+        RuntimeError("503 UNAVAILABLE. high demand"),
+        RuntimeError("429 RESOURCE_EXHAUSTED"),
+        MagicMock(text=" recovered narration "),
+    ]
+
+    result = narrator._generate_narration(client, [frame_path], "prompt")
+
+    assert result == "recovered narration"
+    assert client.models.generate_content.call_count == 3
+
+
+def test_resolve_narration_status():
+    assert narrator.resolve_narration_status(
+        {
+            "narration_job_count": 0,
+            "narrated_segment_count": 0,
+            "failed_segment_count": 0,
+        }
+    ) == "COMPLETED"
+    assert narrator.resolve_narration_status(
+        {
+            "narration_job_count": 3,
+            "narrated_segment_count": 3,
+            "failed_segment_count": 0,
+        }
+    ) == "COMPLETED"
+    assert narrator.resolve_narration_status(
+        {
+            "narration_job_count": 3,
+            "narrated_segment_count": 0,
+            "failed_segment_count": 3,
+        }
+    ) == "FAILED"
+    assert narrator.resolve_narration_status(
+        {
+            "narration_job_count": 3,
+            "narrated_segment_count": 2,
+            "failed_segment_count": 1,
+        }
+    ) == "PARTIAL"

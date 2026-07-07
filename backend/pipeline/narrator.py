@@ -5,6 +5,8 @@
 from __future__ import annotations
 
 import bisect
+import random
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
@@ -15,12 +17,26 @@ from google import genai
 from google.genai import types
 
 from config import (
+    FACE_RANGE_PADDING_SECONDS,
     GEMINI_API_KEY,
     GEMINI_MODEL,
     NARRATION_FRAME_MAX_PX,
     NARRATION_FRAMES_PER_SEGMENT,
     NARRATION_JPEG_QUALITY,
     NARRATION_MAX_CONCURRENCY,
+    NARRATION_MAX_RETRIES,
+    NARRATION_REQUEST_STAGGER_SECONDS,
+    NARRATION_RETRY_BASE_SECONDS,
+    NARRATION_RETRY_MAX_SECONDS,
+)
+
+_RETRYABLE_GEMINI_MARKERS = (
+    "503",
+    "429",
+    "UNAVAILABLE",
+    "RESOURCE_EXHAUSTED",
+    "HIGH DEMAND",
+    "QUOTA",
 )
 from utils.json_io import atomic_write_json, read_json
 from utils.paths import JobPaths
@@ -187,6 +203,30 @@ def _frame_part(path: Path) -> types.Part:
     )
 
 
+def _is_retryable_gemini_error(exc: Exception) -> bool:
+    message = str(exc).upper()
+    return any(marker in message for marker in _RETRYABLE_GEMINI_MARKERS)
+
+
+def _retry_delay_seconds(attempt: int) -> float:
+    delay = NARRATION_RETRY_BASE_SECONDS * (2**attempt)
+    delay += random.uniform(0, 1)
+    return min(delay, NARRATION_RETRY_MAX_SECONDS)
+
+
+def _frame_selection_range(
+    segment: dict[str, Any],
+    video_duration: float,
+) -> tuple[float, float]:
+    start = max(0.0, float(segment["start"]) - FACE_RANGE_PADDING_SECONDS)
+    end = float(segment["end"]) + FACE_RANGE_PADDING_SECONDS
+
+    if video_duration > 0:
+        end = min(video_duration, end)
+
+    return start, end
+
+
 def _generate_narration(
     client: genai.Client,
     frame_paths: list[Path],
@@ -197,18 +237,33 @@ def _generate_narration(
     for path in frame_paths:
         contents.append(_frame_part(path))
 
-    response = client.models.generate_content(
-        model=GEMINI_MODEL,
-        contents=contents,
-    )
+    last_exc: Exception | None = None
 
-    return (response.text or "").strip()
+    for attempt in range(NARRATION_MAX_RETRIES + 1):
+        try:
+            response = client.models.generate_content(
+                model=GEMINI_MODEL,
+                contents=contents,
+            )
+            return (response.text or "").strip()
+        except Exception as exc:
+            last_exc = exc
+            if not _is_retryable_gemini_error(exc) or attempt >= NARRATION_MAX_RETRIES:
+                raise
+
+            time.sleep(_retry_delay_seconds(attempt))
+
+    if last_exc is not None:
+        raise last_exc
+
+    raise RuntimeError("Gemini narration failed without an exception.")
 
 
 def _prepare_narration_jobs(
     segments: list[dict[str, Any]],
     sorted_samples: list[dict[str, Any]],
     job_dir: Path,
+    video_duration: float,
 ) -> list[NarrationJob]:
     dialogue_segments = _dialogue_segments(segments)
     jobs: list[NarrationJob] = []
@@ -217,10 +272,11 @@ def _prepare_narration_jobs(
         if not segment.get("narration_safe"):
             continue
 
+        frame_start, frame_end = _frame_selection_range(segment, video_duration)
         frames = _select_frames(
             sorted_samples,
-            segment["start"],
-            segment["end"],
+            frame_start,
+            frame_end,
             NARRATION_FRAMES_PER_SEGMENT,
         )
 
@@ -259,7 +315,11 @@ def _prepare_narration_jobs(
 def _run_narration_job(
     client: genai.Client,
     job: NarrationJob,
+    stagger_seconds: float = 0.0,
 ) -> tuple[NarrationJob, str | None, str | None]:
+    if stagger_seconds > 0:
+        time.sleep(stagger_seconds)
+
     try:
         narration = _generate_narration(client, job.frame_paths, job.prompt)
         return job, narration, None
@@ -280,8 +340,13 @@ def _execute_narration_jobs(
 
     with ThreadPoolExecutor(max_workers=worker_count) as executor:
         futures = [
-            executor.submit(_run_narration_job, client, job)
-            for job in jobs
+            executor.submit(
+                _run_narration_job,
+                client,
+                job,
+                index * NARRATION_REQUEST_STAGGER_SECONDS,
+            )
+            for index, job in enumerate(jobs)
         ]
 
         for future in as_completed(futures):
@@ -309,7 +374,13 @@ def run_narration(job_id: str) -> dict[str, Any]:
     segments = segments_data.get("segments", [])
 
     sorted_samples = sorted(samples, key=lambda sample: sample["timestamp"])
-    jobs = _prepare_narration_jobs(segments, sorted_samples, paths.job_dir)
+    video_duration = float(face_data.get("source", {}).get("duration") or 0.0)
+    jobs = _prepare_narration_jobs(
+        segments,
+        sorted_samples,
+        paths.job_dir,
+        video_duration,
+    )
 
     client = get_gemini_client()
     narrated_count, failed_count = _execute_narration_jobs(client, jobs)
@@ -317,6 +388,24 @@ def run_narration(job_id: str) -> dict[str, Any]:
     atomic_write_json(paths.segments_json, segments_data)
 
     return {
+        "narration_job_count": len(jobs),
         "narrated_segment_count": narrated_count,
         "failed_segment_count": failed_count,
     }
+
+
+def resolve_narration_status(result: dict[str, Any]) -> str:
+    job_count = int(result.get("narration_job_count", 0))
+    narrated_count = int(result.get("narrated_segment_count", 0))
+    failed_count = int(result.get("failed_segment_count", 0))
+
+    if job_count == 0:
+        return "COMPLETED"
+
+    if failed_count == 0:
+        return "COMPLETED"
+
+    if narrated_count == 0:
+        return "FAILED"
+
+    return "PARTIAL"

@@ -16,7 +16,7 @@ from pipeline.face_renderer import (
     save_annotated_frame,
 )
 from pipeline.face_tracker import FaceTracker
-from utils.ffmpeg_paths import extract_video_frame_jpeg_bytes, get_video_metadata
+from utils.ffmpeg_paths import extract_video_frame_jpeg_bytes, probe_media_info
 from utils.json_io import atomic_write_json
 from utils.paths import JobPaths
 
@@ -38,7 +38,7 @@ def run_face_analysis(
 
     paths.annotated_frames_dir.mkdir(parents=True, exist_ok=True)
 
-    video_metadata = get_video_metadata(input_video)
+    video_metadata = probe_media_info(input_video).metadata
     duration = float(video_metadata.get("duration") or 0.0)
     fps = float(video_metadata.get("fps") or 30.0)
     frame_width = int(video_metadata.get("width") or 0)

@@ -62,7 +62,7 @@ export function collectPreviewFrames(enrichedResult) {
         ...frame,
         segmentId: segment.segment_id,
         personIds: (frame.faces ?? [])
-          .map((face) => face.person_id)
+          .map((face) => (typeof face === 'string' ? face : face?.person_id))
           .filter(Boolean),
       })
     }
@@ -135,7 +135,7 @@ const PROCESSING_TITLES = [
 ]
 
 function statusToStepState(status) {
-  if (status === 'COMPLETED') return 'completed'
+  if (status === 'COMPLETED' || status === 'PARTIAL') return 'completed'
   if (status === 'FAILED') return 'failed'
   if (status === 'PROCESSING') return 'in-progress'
   return 'waiting'
