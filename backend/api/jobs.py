@@ -38,17 +38,12 @@ async def create_job(file: UploadFile = File(...)):
             "face_progress": 0,
             "face_current_step": "얼굴 분석 대기 중",
             "face_error": None,
-            "transition_status": "PENDING",
-            "transition_error": None,
             "narration_status": "PENDING",
             "combine_status": "PENDING",
         },
     )
 
-    # Voice and whole-video Gemini analysis start together. Voice determines
-    # the non-speech ranges and queues face analysis after it completes.
     celery_app.send_task("tasks.process_video_job", args=[job_id])
-    celery_app.send_task("tasks.process_transition_job", args=[job_id])
 
     return {"job_id": job_id, "status": "PENDING"}
 
@@ -64,6 +59,8 @@ def get_job(job_id: str):
 
 @router.get("/api/jobs/{job_id}/segments/enriched")
 def get_job_segments_enriched(job_id: str):
+    if not job_store.exists(job_id):
+        raise HTTPException(status_code=404, detail="Job not found")
 
     job_data = job_store.get(job_id)
     if job_data is None:

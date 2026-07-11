@@ -7,8 +7,14 @@ from pipeline.audio_extractor import (
     create_silent_wav,
     extract_audio_from_video,
 )
+from pipeline.segment_enricher import (
+    build_segments_enriched,
+    save_segments_enriched,
+    try_merge_face_segments_for_job,
+)
 from pipeline.transcriber import build_segments_from_words, transcribe_audio
-from pipeline.face_ranges import build_non_speech_time_ranges
+from pipeline.face_ranges import build_narration_safe_time_ranges
+from config import FACE_RANGE_PADDING_SECONDS
 from utils.ffmpeg_paths import MediaProbeInfo, probe_media_info
 from utils.json_io import atomic_write_json
 from utils.paths import JobPaths
@@ -45,7 +51,7 @@ def run_analysis(job_id: str, store: JobStore) -> dict:
     paths = JobPaths(job_id)
     video_path = paths.find_input_video()
     audio_path = paths.audio_wav
-    segments_path = paths.voice_segments_json
+    segments_path = paths.segments_json
 
     store.update(
         job_id,
@@ -93,18 +99,22 @@ def run_analysis(job_id: str, store: JobStore) -> dict:
         context.has_audio,
     )
 
-    atomic_write_json(
-        segments_path,
-        {
-            "segments": segments,
-            "language": language,
-            "video_metadata": context.video_metadata,
-        },
-    )
+    atomic_write_json(segments_path, {"segments": segments})
 
-    face_time_ranges = build_non_speech_time_ranges(
+    enriched = build_segments_enriched(
+        job_id=job_id,
+        raw_segments=segments,
+        video_path=video_path,
+        video_metadata=context.video_metadata,
+        language=language,
+    )
+    save_segments_enriched(job_id, enriched)
+    try_merge_face_segments_for_job(job_id)
+
+    face_time_ranges = build_narration_safe_time_ranges(
         segments,
         context.duration,
+        FACE_RANGE_PADDING_SECONDS,
     )
 
     store.update(
@@ -121,8 +131,6 @@ def run_analysis(job_id: str, store: JobStore) -> dict:
         "duration": round(context.duration, 2),
         "has_audio": context.has_audio,
         "segment_count": len(segments),
-        "narration_candidate_count": sum(
-            1 for segment in segments if segment.get("narration_safe")
-        ),
+        "narration_candidate_count": enriched["summary"]["narration_candidate_count"],
         "face_time_ranges": face_time_ranges,
     }

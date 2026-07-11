@@ -8,9 +8,6 @@ imageio-ffmpeg
 insightface
 opencv-python-headless
 numpy
-google-genai
-python-dotenv
-edge-tts
 
 # Windows local GPU acceleration for Intel/AMD/NVIDIA through DirectML.
 # This replaces the plain onnxruntime package from requirements.txt.

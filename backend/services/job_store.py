@@ -1,40 +1,10 @@
+import fcntl
 import json
-import os
-from contextlib import contextmanager
 from datetime import datetime, timezone
-from typing import Any, Iterator, TextIO
-
-if os.name == "nt":
-    import msvcrt
-else:
-    import fcntl
+from typing import Any
 
 from utils.json_io import atomic_write_json, read_json, to_json_safe
 from utils.paths import JobPaths
-
-
-@contextmanager
-def _exclusive_file_lock(handle: TextIO) -> Iterator[None]:
-    """Lock a job file across processes on Windows and POSIX systems."""
-    file_descriptor = handle.fileno()
-
-    if os.name == "nt":
-        # msvcrt locks a byte range starting at the descriptor's current offset.
-        handle.flush()
-        os.lseek(file_descriptor, 0, os.SEEK_SET)
-        msvcrt.locking(file_descriptor, msvcrt.LK_LOCK, 1)
-    else:
-        fcntl.flock(file_descriptor, fcntl.LOCK_EX)
-
-    try:
-        yield
-    finally:
-        if os.name == "nt":
-            handle.flush()
-            os.lseek(file_descriptor, 0, os.SEEK_SET)
-            msvcrt.locking(file_descriptor, msvcrt.LK_UNLCK, 1)
-        else:
-            fcntl.flock(file_descriptor, fcntl.LOCK_UN)
 
 
 def _utc_now() -> str:
@@ -45,7 +15,6 @@ def is_post_processing_ready(job_data: dict[str, Any]) -> bool:
     return (
         job_data.get("status") == "COMPLETED"
         and job_data.get("face_status") == "COMPLETED"
-        and job_data.get("transition_status") == "COMPLETED"
         and job_data.get("narration_status", "PENDING") == "PENDING"
         and job_data.get("combine_status", "PENDING") == "PENDING"
     )
@@ -89,33 +58,19 @@ class FileJobStore(JobStore):
         paths = JobPaths(job_id)
         if not paths.job_json.exists():
             return None
-        with open(paths.job_json, "r+", encoding="utf-8") as handle:
-            with _exclusive_file_lock(handle):
-                handle.seek(0)
-                return json.load(handle)
+        return read_json(paths.job_json)
 
     def update(self, job_id: str, **kwargs: Any) -> dict[str, Any]:
-        paths = JobPaths(job_id)
-        if not paths.job_json.exists():
+        job_data = self.get(job_id)
+        if job_data is None:
             raise FileNotFoundError(f"Job not found: {job_id}")
 
-        with open(paths.job_json, "r+", encoding="utf-8") as handle:
-            with _exclusive_file_lock(handle):
-                handle.seek(0)
-                job_data = json.load(handle)
-                job_data.update(kwargs)
-                job_data["updated_at"] = _utc_now()
+        job_data.update(kwargs)
+        job_data["updated_at"] = _utc_now()
 
-                handle.seek(0)
-                json.dump(
-                    to_json_safe(job_data),
-                    handle,
-                    ensure_ascii=False,
-                    indent=2,
-                )
-                handle.truncate()
-                handle.flush()
-                return job_data
+        paths = JobPaths(job_id)
+        atomic_write_json(paths.job_json, job_data)
+        return job_data
 
     def exists(self, job_id: str) -> bool:
         return JobPaths(job_id).job_json.exists()
@@ -130,7 +85,8 @@ class FileJobStore(JobStore):
             return False
 
         with open(paths.job_json, "r+", encoding="utf-8") as handle:
-            with _exclusive_file_lock(handle):
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            try:
                 handle.seek(0)
                 job_data = json.load(handle)
 
@@ -151,6 +107,8 @@ class FileJobStore(JobStore):
                 handle.truncate()
                 handle.flush()
                 return True
+            finally:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
 job_store = FileJobStore()

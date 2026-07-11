@@ -149,6 +149,14 @@ def run_face_analysis(
                         detection["person_id"]
                         for detection in detections
                     ],
+                    "faces": [
+                        {
+                            "person_id": detection["person_id"],
+                            "confidence": detection["confidence"],
+                            "bbox": detection["bbox"],
+                        }
+                        for detection in detections
+                    ],
                 }
             )
 
@@ -295,8 +303,7 @@ def _read_frame_at(
 
 
 def _frame_filename(timestamp: float) -> str:
-    timestamp_text = f"{timestamp:.3f}".rstrip("0").rstrip(".")
-    return f"frame_{timestamp_text}.jpg"
+    return f"frame_{timestamp:.2f}.jpg"
 
 
 def _frame_fingerprint(frame: np.ndarray) -> np.ndarray:

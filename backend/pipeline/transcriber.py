@@ -1,13 +1,6 @@
 from pathlib import Path
 from typing import Any
 
-from config import (
-    WHISPER_VAD_MIN_SILENCE_MS,
-    WHISPER_VAD_MIN_SPEECH_MS,
-    WHISPER_VAD_SPEECH_PAD_MS,
-    WHISPER_VAD_THRESHOLD,
-)
-
 
 _model: Any | None = None
 
@@ -32,12 +25,6 @@ def transcribe_audio(audio_path: Path):
         beam_size=5,
         word_timestamps=True,
         vad_filter=True,
-        vad_parameters={
-            "threshold": WHISPER_VAD_THRESHOLD,
-            "min_speech_duration_ms": WHISPER_VAD_MIN_SPEECH_MS,
-            "min_silence_duration_ms": WHISPER_VAD_MIN_SILENCE_MS,
-            "speech_pad_ms": WHISPER_VAD_SPEECH_PAD_MS,
-        },
     )
 
     words = []
@@ -70,7 +57,7 @@ def transcribe_audio(audio_path: Path):
     }
 
 
-def _build_script_segment(start, end, speech, text=""):
+def _build_script_segment(start, end, speech, text="", sound_category=None):
     start = round(start, 2)
     end = round(end, 2)
     segment_duration = round(max(0, end - start), 2)
@@ -79,6 +66,8 @@ def _build_script_segment(start, end, speech, text=""):
         "start": start,
         "end": end,
         "type": "speech" if speech else "non_speech",
+        "sound_category": sound_category or ("human_speech" if speech else "silence_or_background"),
+        "speech": speech,
         "narration_safe": (not speech) and segment_duration >= 3,
         "text": text if speech else "",
     }
@@ -98,6 +87,7 @@ def build_segments_from_words(words, duration, has_audio):
                 start=0,
                 end=duration,
                 speech=False,
+                sound_category="no_audio_track",
             )
         ]
 
@@ -107,6 +97,7 @@ def build_segments_from_words(words, duration, has_audio):
                 start=0,
                 end=duration,
                 speech=False,
+                sound_category="audio_exists_but_no_detected_speech",
             )
         ]
 

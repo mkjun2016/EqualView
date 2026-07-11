@@ -13,25 +13,12 @@ class JobPaths:
         return self.job_dir / "job.json"
 
     @property
-    def voice_segments_json(self) -> Path:
-        return self.job_dir / "voice_segments.json"
-
-    @property
-    def enriched_segments_json(self) -> Path:
-        return self.job_dir / "enriched_segments.json"
-
-    @property
-    def transition_segments_json(self) -> Path:
-        return self.job_dir / "transition_segments.json"
-
-    # Compatibility aliases for callers outside the main pipeline.
-    @property
     def segments_json(self) -> Path:
-        return self.voice_segments_json
+        return self.job_dir / "segments.json"
 
     @property
     def segments_enriched_json(self) -> Path:
-        return self.enriched_segments_json
+        return self.job_dir / "segments_enriched.json"
 
     @property
     def face_frames_json(self) -> Path:
@@ -46,28 +33,12 @@ class JobPaths:
         return self.job_dir / "face_segments.json"
 
     @property
-    def transitions_json(self) -> Path:
-        return self.transition_segments_json
-
-    @property
     def annotated_frames_dir(self) -> Path:
         return self.job_dir / "annotated_frames"
 
     @property
     def narration_audio_dir(self) -> Path:
         return self.job_dir / "narration_audio"
-
-    @property
-    def transition_audio_dir(self) -> Path:
-        return self.job_dir / "transition_audio"
-
-    @property
-    def base_narrated_video(self) -> Path:
-        return self.job_dir / "base_narrated.mp4"
-
-    @property
-    def timeline_offsets_json(self) -> Path:
-        return self.job_dir / "timeline_offsets.json"
 
     @property
     def output_video(self) -> Path:

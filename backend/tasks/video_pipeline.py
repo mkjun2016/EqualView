@@ -27,10 +27,11 @@ def process_video_job(job_id: str) -> None:
         runner = importlib.import_module("pipeline.runner")
         result = runner.run_analysis(job_id, job_store)
 
+        face_time_ranges = result.get("face_time_ranges")
         celery_app.send_task(
             "tasks.process_face_job",
             args=[job_id],
-            kwargs={"time_ranges": result["face_time_ranges"]},
+            kwargs={"time_ranges": face_time_ranges},
         )
     except Exception as exc:
         job_store.update(
@@ -63,6 +64,9 @@ def process_face_job(
         face_runner = importlib.import_module("pipeline.face_runner")
         result = face_runner.run_face_analysis(job_id, time_ranges=time_ranges)
 
+        segment_enricher = importlib.import_module("pipeline.segment_enricher")
+        segment_enricher.try_merge_face_segments_for_job(job_id)
+
         job_store.update(
             job_id,
             face_status="COMPLETED",
@@ -74,44 +78,13 @@ def process_face_job(
             face_sample_count=result.get("sample_count", 0),
         )
         _run_post_processing_if_ready(job_id)
+
     except Exception as exc:
         job_store.update(
             job_id,
             face_status="FAILED",
             face_error=str(exc),
             face_current_step="얼굴 분석 실패",
-        )
-        raise
-
-
-@celery_app.task(name="tasks.process_transition_job")
-def process_transition_job(job_id: str) -> None:
-    started_at = time.monotonic()
-
-    try:
-        _ensure_backend_path()
-        job_store.update(
-            job_id,
-            transition_status="PROCESSING",
-            transition_error=None,
-        )
-
-        transition_runner = importlib.import_module("pipeline.scene_transition")
-        result = transition_runner.run_scene_transition_analysis(job_id)
-
-        job_store.update(
-            job_id,
-            transition_status="COMPLETED",
-            transition_error=None,
-            transition_result=result,
-            transition_seconds=round(time.monotonic() - started_at, 2),
-        )
-        _run_post_processing_if_ready(job_id)
-    except Exception as exc:
-        job_store.update(
-            job_id,
-            transition_status="FAILED",
-            transition_error=str(exc),
         )
         raise
 
@@ -123,9 +96,6 @@ def _run_post_processing_if_ready(job_id: str) -> None:
     narration_started_at = time.monotonic()
 
     try:
-        segment_enricher = importlib.import_module("pipeline.segment_enricher")
-        segment_enricher.finalize_segments_enriched(job_id)
-
         narrator = importlib.import_module("pipeline.narrator")
         narration_result = narrator.run_narration(job_id)
     except Exception as exc:

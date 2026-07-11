@@ -3,18 +3,19 @@ from __future__ import annotations
 from typing import Any
 
 
-def build_non_speech_time_ranges(
+def build_narration_safe_time_ranges(
     segments: list[dict[str, Any]],
     video_duration: float,
+    padding_seconds: float,
 ) -> list[dict[str, float]]:
     ranges: list[dict[str, float]] = []
 
     for segment in segments:
-        if segment.get("type") != "non_speech":
+        if not segment.get("narration_safe"):
             continue
 
-        start = max(0.0, float(segment["start"]))
-        end = min(float(video_duration), float(segment["end"]))
+        start = max(0.0, float(segment["start"]) - padding_seconds)
+        end = min(float(video_duration), float(segment["end"]) + padding_seconds)
 
         if end <= start:
             continue
@@ -67,7 +68,7 @@ def build_sample_timestamps_in_ranges(
             continue
 
         current = start
-        while current < end - 0.001:
+        while current <= end + 0.001:
             timestamps.append(round(current, 3))
             current += interval
 
