@@ -93,6 +93,7 @@ export function createJobPollSnapshot(job) {
     current_step: job?.current_step ?? null,
     face_status: job?.face_status ?? null,
     face_progress: job?.face_progress ?? 0,
+    transition_status: job?.transition_status ?? null,
     narration_status: job?.narration_status ?? null,
     combine_status: job?.combine_status ?? null,
   })
@@ -124,12 +125,17 @@ export function formatJobStatusMessage(job) {
     parts.push(`Face: ${job.face_error}`)
   }
 
+  if (job?.transition_status === 'FAILED' && job?.transition_error) {
+    parts.push(`Scene transition: ${job.transition_error}`)
+  }
+
   return parts.join(' · ')
 }
 
 const PROCESSING_TITLES = [
   'Extracting Dialogue',
   'Detecting Faces',
+  'Detecting Scenes',
   'Generating Narration',
   'Combining Audio',
 ]
@@ -145,8 +151,9 @@ export function deriveProcessingSteps(job) {
   return [
     { title: PROCESSING_TITLES[0], state: statusToStepState(job.status) },
     { title: PROCESSING_TITLES[1], state: statusToStepState(job.face_status) },
-    { title: PROCESSING_TITLES[2], state: statusToStepState(job.narration_status) },
-    { title: PROCESSING_TITLES[3], state: statusToStepState(job.combine_status) },
+    { title: PROCESSING_TITLES[2], state: statusToStepState(job.transition_status) },
+    { title: PROCESSING_TITLES[3], state: statusToStepState(job.narration_status) },
+    { title: PROCESSING_TITLES[4], state: statusToStepState(job.combine_status) },
   ]
 }
 
@@ -158,6 +165,7 @@ export function getProcessingProgress(steps) {
 export const INITIAL_PROCESSING_STEPS = [
   { title: 'Extracting Dialogue', state: 'in-progress' },
   { title: 'Detecting Faces', state: 'in-progress' },
+  { title: 'Detecting Scenes', state: 'waiting' },
   { title: 'Generating Narration', state: 'waiting' },
   { title: 'Combining Audio', state: 'waiting' },
 ]

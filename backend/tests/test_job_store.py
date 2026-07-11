@@ -19,6 +19,7 @@ def _ready_job(extra: dict | None = None) -> dict:
         "job_id": JOB_ID,
         "status": "COMPLETED",
         "face_status": "COMPLETED",
+        "transition_status": "COMPLETED",
         "narration_status": "PENDING",
         "combine_status": "PENDING",
     }

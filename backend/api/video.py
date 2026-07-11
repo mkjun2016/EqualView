@@ -2,7 +2,6 @@ from fastapi import APIRouter, UploadFile, File
 from pathlib import Path
 import uuid
 import json
-import asyncio
 
 from utils.json_io import to_json_safe
 from pipeline.audio_extractor import (
@@ -67,10 +66,6 @@ async def extract_audio(video: UploadFile = File(...)):
         audio_exists
     )
 
-    # mock steps for now
-    await asyncio.sleep(0.5)
-    await asyncio.sleep(0.5)
-
     processing_steps = [
         {
             "key": "extracting_audio",
@@ -98,8 +93,8 @@ async def extract_audio(video: UploadFile = File(...)):
     ]
 
     json_data = {
-    "segments": segments
-}
+        "segments": segments
+    }
 
     with open(json_path, "w", encoding="utf-8") as f:
         json.dump(to_json_safe(json_data), f, ensure_ascii=False, indent=2)

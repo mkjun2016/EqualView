@@ -377,6 +377,7 @@ function App() {
 				if (
 					job.status === "COMPLETED" &&
 					job.face_status === "COMPLETED" &&
+					job.transition_status === "COMPLETED" &&
 					(job.narration_status === "COMPLETED" ||
 						job.narration_status === "PARTIAL") &&
 					job.combine_status === "COMPLETED"
@@ -397,6 +398,7 @@ function App() {
 					setStepTimings({
 						dialogue: job.dialogue_seconds,
 						face: job.face_seconds,
+						transition: job.transition_seconds,
 						narration: job.narration_seconds,
 						combine: job.combine_seconds,
 					});
@@ -408,12 +410,14 @@ function App() {
 				if (
 					job.status === "FAILED" ||
 					job.face_status === "FAILED" ||
+					job.transition_status === "FAILED" ||
 					job.narration_status === "FAILED" ||
 					job.combine_status === "FAILED"
 				) {
 					setStatus(
 						job.error ||
 							job.face_error ||
+							job.transition_error ||
 							job.narration_error ||
 							job.combine_error ||
 							"Processing failed."
