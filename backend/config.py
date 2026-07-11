@@ -143,5 +143,5 @@ NARRATION_JPEG_QUALITY = int(
 
 TTS_VOICE = os.getenv("TTS_VOICE", "ko-KR-SunHiNeural")
 TRANSITION_TTS_VOICE = os.getenv(
-    "TRANSITION_TTS_VOICE", "ko-KR-SeoHyeonNeural"
+    "TRANSITION_TTS_VOICE", "ko-KR-InJoonNeural"
 )

@@ -41,8 +41,14 @@ def _mix_regular_narrations(
         narration_path = paths.job_dir / segment["narration_audio"]
         inputs.append(narration_path)
         input_index = index + 2
-        available_duration = max(0.1, float(segment["end"]) - float(segment["start"]))
-        delay_ms = round(float(segment["start"]) * 1000)
+        narration_start = float(
+            segment.get("narration_start_timestamp", segment["start"])
+        )
+        available_duration = max(
+            0.1,
+            float(segment["end"]) - narration_start,
+        )
+        delay_ms = round(narration_start * 1000)
         label = f"a{index}"
         filter_parts.append(
             f"[{input_index}:a]atempo={NARRATION_ATEMPO:.3f},"

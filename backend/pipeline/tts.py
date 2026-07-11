@@ -16,8 +16,29 @@ from utils.paths import JobPaths
 
 
 async def _synthesize_one(text: str, output_path: Path, voice: str) -> None:
-    communicate = edge_tts.Communicate(text, voice=voice)
-    await communicate.save(str(output_path))
+    # Some additional Korean Edge voices are advertised by Azure but can be
+    # intermittently unavailable through the consumer Edge endpoint. Keep a
+    # distinct female transition voice when possible and fall back safely so
+    # a voice availability issue never removes all transition narration.
+    voices = [voice]
+    if voice == TRANSITION_TTS_VOICE:
+        voices.extend(["ko-KR-HyunsuNeural", "ko-KR-BongJinNeural"])
+
+    last_error: Exception | None = None
+    for candidate in dict.fromkeys(voices):
+        try:
+            output_path.unlink(missing_ok=True)
+            communicate = edge_tts.Communicate(text, voice=candidate)
+            await communicate.save(str(output_path))
+            if output_path.exists() and output_path.stat().st_size > 0:
+                return
+        except Exception as exc:
+            last_error = exc
+
+    output_path.unlink(missing_ok=True)
+    if last_error is not None:
+        raise last_error
+    raise RuntimeError("Edge TTS returned no transition audio")
 
 
 async def _synthesize_all(
@@ -110,8 +131,13 @@ def run_tts(job_id: str) -> dict[str, Any]:
         for transition in transitions_data.get("scenes", []):
             anchor = float(transition["anchor_timestamp"])
             if narration_start <= anchor < narration_end:
-                transition["insertion_timestamp"] = narration_start
+                guarded_start = min(
+                    float(segment["end"]),
+                    narration_start + 0.7,
+                )
+                transition["insertion_timestamp"] = guarded_start
                 transition["collision_segment_id"] = segment["segment_id"]
+                segment["narration_start_timestamp"] = guarded_start
                 segment["collision_action"] = "transition_before_narration"
 
     atomic_write_json(paths.enriched_segments_json, segments_data)
