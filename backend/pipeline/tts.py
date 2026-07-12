@@ -63,6 +63,7 @@ def run_tts(job_id: str) -> dict[str, Any]:
     paths = JobPaths(job_id)
     segments_data = read_json(paths.enriched_segments_json)
     transitions_data = read_json(paths.transition_segments_json)
+    voice_data = read_json(paths.voice_segments_json)
     segments = segments_data.get("segments", [])
 
     paths.narration_audio_dir.mkdir(parents=True, exist_ok=True)
@@ -118,27 +119,61 @@ def run_tts(job_id: str) -> dict[str, Any]:
                 segment["tts_duration"] = duration
             synthesized_count += 1
 
-    # When a transition anchor intersects a regular narration, insert the
-    # transition freeze immediately before that narration starts. The regular
-    # narration then resumes after the transition and its trailing silence.
     for segment in segments:
-        if not segment.get("narration_audio"):
-            continue
-        narration_start = float(segment["start"])
-        narration_end = narration_start + (
-            float(segment.get("narration_audio_duration") or 0.0) / 1.1
-        )
-        for transition in transitions_data.get("scenes", []):
-            anchor = float(transition["anchor_timestamp"])
-            if narration_start <= anchor < narration_end:
-                guarded_start = min(
-                    float(segment["end"]),
-                    narration_start + 0.7,
+        segment.pop("narration_start_timestamp", None)
+        segment.pop("collision_action", None)
+
+    # Transition narration always yields. Inspect collisions only at Gemini's
+    # original anchor and attach the transition immediately after the latest
+    # audio item already playing there. Do not move or truncate source speech
+    # or regular narration, and intentionally do not re-check the resolved
+    # timestamp for a second collision.
+    for transition in transitions_data.get("scenes", []):
+        anchor = float(transition["anchor_timestamp"])
+        collisions: list[dict[str, Any]] = []
+
+        transition.pop("insertion_timestamp", None)
+        transition.pop("speech_collision", None)
+        transition.pop("collision_segment_id", None)
+
+        for voice_segment in voice_data.get("segments", []):
+            if voice_segment.get("type") != "speech":
+                continue
+            start = float(voice_segment["start"])
+            end = float(voice_segment["end"])
+            if start <= anchor < end:
+                collisions.append(
+                    {
+                        "type": "speech",
+                        "start": start,
+                        "end": end,
+                    }
                 )
-                transition["insertion_timestamp"] = guarded_start
-                transition["collision_segment_id"] = segment["segment_id"]
-                segment["narration_start_timestamp"] = guarded_start
-                segment["collision_action"] = "transition_before_narration"
+
+        for segment in segments:
+            if not segment.get("narration_audio"):
+                continue
+            start = float(segment["start"])
+            end = start + (
+                float(segment.get("narration_audio_duration") or 0.0) / 1.1
+            )
+            if start <= anchor < end:
+                collisions.append(
+                    {
+                        "type": "regular_narration",
+                        "segment_id": segment["segment_id"],
+                        "start": start,
+                        "end": end,
+                    }
+                )
+
+        if collisions:
+            insertion_timestamp = max(item["end"] for item in collisions)
+            transition["insertion_timestamp"] = round(insertion_timestamp, 3)
+            transition["deferred_from_anchor"] = round(
+                insertion_timestamp - anchor, 3
+            )
+            transition["yielded_to"] = collisions
 
     atomic_write_json(paths.enriched_segments_json, segments_data)
     atomic_write_json(paths.transition_segments_json, transitions_data)

@@ -10,7 +10,7 @@ from utils.paths import JobPaths
 
 
 NARRATION_ATEMPO = 1.1
-TRANSITION_SILENCE_SECONDS = 0.7
+TRANSITION_SILENCE_SECONDS = 0.5
 
 
 def _narrated_segments(segments: list[dict[str, Any]]) -> list[dict[str, Any]]:
