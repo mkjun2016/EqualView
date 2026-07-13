@@ -77,6 +77,14 @@ Be visually specific rather than generic, but describe only evidence visible
 on screen. Do not identify characters by name or infer motives, emotions,
 relationships, occupations, or events that are not clearly shown.
 
+Do not add a scene-change phrase to the first scene description at the start of
+
+
+the video. Every transition_segment_description after the first scene must begin
+with the exact Korean phrase "장면이 바뀌고" and continue as one natural Korean
+audio-description sentence. When visually supported, state which previous setting the video leaves
+and which new setting it enters. 
+
 Write both transition_segment_description and location in Korean. The
 transition_segment_description must always be a natural Korean narration that
 can be read aloud directly without translation or rewriting.
@@ -151,11 +159,13 @@ def run_scene_transition_analysis(job_id: str) -> dict[str, Any]:
             contents=[uploaded_file, _PROMPT],
             config=types.GenerateContentConfig(
                 system_instruction=(
-                    "모든 장면 분석 결과는 반드시 한국어로 작성하세요. "
-                    "JSON 키는 지정된 영문 키를 그대로 사용하되, location과 "
-                    "transition_segment_description의 값에는 영어 문장을 "
-                    "사용하지 마세요. transition_segment_description은 그대로 "
-                    "TTS로 읽을 수 있는 자연스러운 한국어 화면해설이어야 합니다."
+                    "Write all scene-analysis results in Korean. Keep every "
+                    "JSON key exactly as specified in English, but write the "
+                    "values of location and transition_segment_description "
+                    "in Korean only. Do not use English sentences in those "
+                    "values. Each transition_segment_description must be a "
+                    "natural Korean audio-description sentence that can be "
+                    "read directly by TTS."
                 ),
                 response_mime_type="application/json",
                 response_schema=_TRANSITION_SCHEMA,

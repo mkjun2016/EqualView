@@ -410,7 +410,7 @@ def _send_chat_narration(chat: Any, job: NarrationJob) -> str:
 def _run_chat_chunk(
     chunk_index: int,
     jobs: list[NarrationJob],
-    enriched_context: str,
+    timeline_context: str,
 ) -> tuple[int, int]:
     if chunk_index > 0:
         time.sleep(chunk_index * NARRATION_REQUEST_STAGGER_SECONDS)
@@ -419,11 +419,17 @@ def _run_chat_chunk(
     chat = client.chats.create(model=GEMINI_MODEL)
     context_message = (
         "You will create Korean film audio descriptions for one chronological "
-        "section of this video. The complete enriched_segments.json is provided "
-        "below as shared story context. Read it once and retain its dialogue, "
-        "character tracking, timing, and visual context throughout this chat. "
+        "section of this video. The shared context below contains two separate "
+        "timelines: enriched_timeline for dialogue, timing, and tracked people, "
+        "and transition_timeline for detected scene changes and their reserved "
+        "transition descriptions. Read both timelines once and retain their "
+        "chronological and visual context throughout this chat. Regular audio "
+        "descriptions must complement, rather than repeat, information already "
+        "covered by a nearby transition description. Focus regular narration "
+        "on visible actions, people, expressions, and other essential details "
+        "that the transition description does not cover. "
         "Do not generate narration yet. Reply only with CONTEXT_READY.\n\n"
-        f"{enriched_context}"
+        f"{timeline_context}"
     )
     chat.send_message(context_message)
 
@@ -446,13 +452,41 @@ def _run_chat_chunk(
 def _execute_narration_jobs(
     jobs: list[NarrationJob],
     segments_data: dict[str, Any],
+    transition_data: dict[str, Any],
 ) -> tuple[int, int]:
     if not jobs:
         return 0, 0
 
     chunks = _split_contiguous_chunks(jobs, NARRATION_MAX_CONCURRENCY)
-    enriched_context = json.dumps(
-        segments_data,
+    request_context = {
+        "enriched_timeline": [
+            {
+                "segment_id": segment.get("segment_id"),
+                "start": segment.get("start"),
+                "end": segment.get("end"),
+                "duration": segment.get("duration"),
+                "audio_type": segment.get("audio_type"),
+                "dialogue": segment.get("text", ""),
+                "context": segment.get("context", {}),
+                "visible_person_ids": segment.get("persons", {}).get(
+                    "visible_person_ids", []
+                ),
+            }
+            for segment in segments_data.get("segments", [])
+        ],
+        "transition_timeline": [
+            {
+                "anchor_timestamp": scene.get("anchor_timestamp"),
+                "location": scene.get("location", ""),
+                "transition_segment_description": scene.get(
+                    "transition_segment_description", ""
+                ),
+            }
+            for scene in transition_data.get("scenes", [])
+        ],
+    }
+    timeline_context = json.dumps(
+        request_context,
         ensure_ascii=False,
         separators=(",", ":"),
     )
@@ -465,7 +499,7 @@ def _execute_narration_jobs(
                 _run_chat_chunk,
                 index,
                 chunk,
-                enriched_context,
+                timeline_context,
             )
             for index, chunk in enumerate(chunks)
         ]
@@ -481,6 +515,7 @@ def _execute_narration_jobs(
 def run_narration(job_id: str) -> dict[str, Any]:
     paths = JobPaths(job_id)
     segments_data = read_json(paths.enriched_segments_json)
+    transition_data = read_json(paths.transition_segments_json)
     segments = segments_data.get("segments", [])
 
     samples_by_id: dict[str, dict[str, Any]] = {}
@@ -502,7 +537,11 @@ def run_narration(job_id: str) -> dict[str, Any]:
         video_duration,
     )
 
-    narrated_count, failed_count = _execute_narration_jobs(jobs, segments_data)
+    narrated_count, failed_count = _execute_narration_jobs(
+        jobs,
+        segments_data,
+        transition_data,
+    )
 
     atomic_write_json(paths.enriched_segments_json, segments_data)
 

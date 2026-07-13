@@ -62,10 +62,6 @@ class JobPaths:
         return self.job_dir / "transition_audio"
 
     @property
-    def base_narrated_video(self) -> Path:
-        return self.job_dir / "base_narrated.mp4"
-
-    @property
     def timeline_offsets_json(self) -> Path:
         return self.job_dir / "timeline_offsets.json"
 

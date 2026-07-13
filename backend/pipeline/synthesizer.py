@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import shutil
 from pathlib import Path
 from typing import Any
 
@@ -21,79 +20,22 @@ def _narrated_segments(segments: list[dict[str, Any]]) -> list[dict[str, Any]]:
     ]
 
 
-def _mix_regular_narrations(
-    paths: JobPaths,
-    segments: list[dict[str, Any]],
-) -> None:
-    video_path = paths.find_input_video()
-    if not segments:
-        _mux_passthrough(video_path, paths.audio_wav, paths.base_narrated_video)
-        return
-
-    inputs = [video_path, paths.audio_wav]
-    filter_parts: list[str] = [
-        "[0:v]setpts=PTS-STARTPTS[vbase]",
-        "[1:a]asetpts=PTS-STARTPTS[abase]",
+def _source_duration(paths: JobPaths) -> float:
+    """Match the legacy first pass, which ends at the shortest base input."""
+    video_duration = float(probe_media_info(paths.find_input_video()).duration)
+    audio_duration = float(probe_media_info(paths.audio_wav).duration)
+    positive_durations = [
+        duration for duration in (video_duration, audio_duration) if duration > 0
     ]
-    mix_labels = ["abase"]
-
-    for index, segment in enumerate(segments):
-        narration_path = paths.job_dir / segment["narration_audio"]
-        inputs.append(narration_path)
-        input_index = index + 2
-        narration_start = float(
-            segment.get("narration_start_timestamp", segment["start"])
-        )
-        available_duration = max(
-            0.1,
-            float(segment["end"]) - narration_start,
-        )
-        delay_ms = round(narration_start * 1000)
-        label = f"a{index}"
-        filter_parts.append(
-            f"[{input_index}:a]atempo={NARRATION_ATEMPO:.3f},"
-            f"atrim=duration={available_duration:.3f},asetpts=PTS-STARTPTS,"
-            f"adelay={delay_ms}:all=1[{label}]"
-        )
-        mix_labels.append(label)
-
-    mix_inputs = "".join(f"[{label}]" for label in mix_labels)
-    filter_parts.append(
-        f"{mix_inputs}amix=inputs={len(mix_labels)}:duration=first:"
-        "dropout_transition=0:normalize=0[aout]"
-    )
-
-    command = [get_ffmpeg_binary(), "-y"]
-    for input_path in inputs:
-        command += ["-i", str(input_path)]
-    command += [
-        "-filter_complex",
-        ";".join(filter_parts),
-        "-map",
-        "[vbase]",
-        "-map",
-        "[aout]",
-        "-c:v",
-        "libx264",
-        "-preset",
-        "medium",
-        "-crf",
-        "18",
-        "-c:a",
-        "aac",
-        "-shortest",
-        str(paths.base_narrated_video),
-    ]
-    result = subprocess_run(command)
-    if result.returncode != 0:
-        raise RuntimeError(result.stderr)
+    if not positive_durations:
+        raise RuntimeError("Could not determine source duration for synthesis.")
+    return min(positive_durations)
 
 
-def _insert_transition_freezes(
-    paths: JobPaths,
+def _valid_transitions(
     transition_data: dict[str, Any],
-) -> dict[str, Any]:
-    source_duration = float(probe_media_info(paths.base_narrated_video).duration)
+    source_duration: float,
+) -> list[dict[str, Any]]:
     transitions = sorted(
         (
             item
@@ -104,51 +46,164 @@ def _insert_transition_freezes(
             item.get("insertion_timestamp", item["anchor_timestamp"])
         ),
     )
-    if not transitions:
-        shutil.copyfile(paths.base_narrated_video, paths.output_video)
-        output = {
-            "source_duration": round(source_duration, 3),
-            "output_duration": round(source_duration, 3),
-            "total_inserted_duration": 0.0,
-            "insertions": [],
-        }
-        atomic_write_json(paths.timeline_offsets_json, output)
-        return output
 
     valid: list[dict[str, Any]] = []
     last_anchor = -1.0
+    latest_frame_anchor = max(0.0, source_duration - 0.04)
     for transition in transitions:
-        # FFmpeg needs a real source frame after the trim start. Keep an
-        # end-of-video anchor just inside the final frame instead of producing
-        # a zero-length freeze stream.
-        latest_frame_anchor = max(0.0, source_duration - 0.04)
         insertion_timestamp = float(
             transition.get("insertion_timestamp", transition["anchor_timestamp"])
         )
-        anchor = min(
-            latest_frame_anchor,
-            max(0.0, insertion_timestamp),
-        )
-        # Multiple transitions may collide with the same narration and thus
-        # share its start time. Keep them in order so each is inserted before
-        # that narration instead of silently dropping later transitions.
+        anchor = min(latest_frame_anchor, max(0.0, insertion_timestamp))
         if anchor < last_anchor - 0.001:
             continue
         valid.append({**transition, "insertion_timestamp": anchor})
         last_anchor = anchor
 
-    command = [get_ffmpeg_binary(), "-y", "-i", str(paths.base_narrated_video)]
-    for transition in valid:
+    return valid
+
+
+def _regular_audio_mix_filters(
+    segments: list[dict[str, Any]],
+) -> list[str]:
+    filters = [
+        "[1:a]asetpts=PTS-STARTPTS,aresample=48000,"
+        "aformat=sample_fmts=fltp:channel_layouts=stereo[abase]"
+    ]
+    mix_labels = ["abase"]
+
+    for index, segment in enumerate(segments):
+        input_index = index + 2
+        narration_start = float(
+            segment.get("narration_start_timestamp", segment["start"])
+        )
+        delay_ms = round(narration_start * 1000)
+        label = f"regular{index}"
+        filters.append(
+            f"[{input_index}:a]atempo={NARRATION_ATEMPO:.3f},"
+            "asetpts=PTS-STARTPTS,"
+            f"adelay={delay_ms}:all=1,aresample=48000,"
+            "aformat=sample_fmts=fltp:channel_layouts=stereo"
+            f"[{label}]"
+        )
+        mix_labels.append(label)
+
+    if len(mix_labels) == 1:
+        filters.append("[abase]anull[amixed]")
+        return filters
+
+    mix_inputs = "".join(f"[{label}]" for label in mix_labels)
+    filters.append(
+        f"{mix_inputs}amix=inputs={len(mix_labels)}:duration=first:"
+        "dropout_transition=0:normalize=0[amixed]"
+    )
+    return filters
+
+
+def _count_source_audio_chunks(
+    transitions: list[dict[str, Any]],
+    source_duration: float,
+) -> int:
+    count = 0
+    previous_anchor = 0.0
+    for transition in transitions:
+        anchor = float(transition["insertion_timestamp"])
+        if anchor > previous_anchor + 0.001:
+            count += 1
+        previous_anchor = anchor
+    if previous_anchor < source_duration - 0.001:
+        count += 1
+    return count
+
+
+def _write_empty_transition_timeline(
+    paths: JobPaths,
+    source_duration: float,
+) -> dict[str, Any]:
+    timeline = {
+        "source_duration": round(source_duration, 3),
+        "output_duration": round(source_duration, 3),
+        "total_inserted_duration": 0.0,
+        "insertions": [],
+    }
+    atomic_write_json(paths.timeline_offsets_json, timeline)
+    return timeline
+
+
+def _synthesize(
+    paths: JobPaths,
+    segments: list[dict[str, Any]],
+    transition_data: dict[str, Any],
+) -> dict[str, Any]:
+    """Mix regular narration and insert transition freezes in one encode."""
+    video_path = paths.find_input_video()
+    source_duration = _source_duration(paths)
+    transitions = _valid_transitions(transition_data, source_duration)
+
+    command = [
+        get_ffmpeg_binary(),
+        "-y",
+        "-i",
+        str(video_path),
+        "-i",
+        str(paths.audio_wav),
+    ]
+    for segment in segments:
+        command += ["-i", str(paths.job_dir / segment["narration_audio"])]
+    for transition in transitions:
         command += ["-i", str(paths.job_dir / transition["tts_audio"])]
 
-    filters: list[str] = []
+    filters = _regular_audio_mix_filters(segments)
+    if not transitions:
+        filters.append("[0:v]setpts=PTS-STARTPTS[vout]")
+        command += [
+            "-filter_complex",
+            ";".join(filters),
+            "-map",
+            "[vout]",
+            "-map",
+            "[amixed]",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "medium",
+            "-crf",
+            "18",
+            "-c:a",
+            "aac",
+            "-shortest",
+            "-movflags",
+            "+faststart",
+            str(paths.output_video),
+        ]
+        result = subprocess_run(command)
+        if result.returncode != 0:
+            raise RuntimeError(result.stderr)
+        return _write_empty_transition_timeline(paths, source_duration)
+
+    source_audio_chunks = _count_source_audio_chunks(
+        transitions,
+        source_duration,
+    )
+    if source_audio_chunks <= 0:
+        raise RuntimeError("Single-pass synthesis produced no source audio chunks.")
+    if source_audio_chunks == 1:
+        filters.append("[amixed]anull[sourcea0]")
+    else:
+        split_outputs = "".join(
+            f"[sourcea{index}]" for index in range(source_audio_chunks)
+        )
+        filters.append(f"[amixed]asplit={source_audio_chunks}{split_outputs}")
+
     concat_labels: list[str] = []
     previous_anchor = 0.0
     cumulative_offset = 0.0
     insertions: list[dict[str, Any]] = []
     pair_count = 0
+    source_audio_index = 0
+    transition_input_offset = 2 + len(segments)
 
-    for index, transition in enumerate(valid):
+    for index, transition in enumerate(transitions):
         anchor = float(transition["insertion_timestamp"])
         spoken_duration = float(transition["tts_duration"]) / NARRATION_ATEMPO
         freeze_duration = round(
@@ -163,12 +218,13 @@ def _insert_transition_freezes(
                 f"setpts=PTS-STARTPTS[{video_label}]"
             )
             filters.append(
-                f"[0:a]atrim=start={previous_anchor:.3f}:end={anchor:.3f},"
-                "asetpts=PTS-STARTPTS,aresample=48000,"
-                f"aformat=sample_fmts=fltp:channel_layouts=stereo[{audio_label}]"
+                f"[sourcea{source_audio_index}]"
+                f"atrim=start={previous_anchor:.3f}:end={anchor:.3f},"
+                f"asetpts=PTS-STARTPTS[{audio_label}]"
             )
             concat_labels.extend([f"[{video_label}]", f"[{audio_label}]"])
             pair_count += 1
+            source_audio_index += 1
 
         freeze_video_label = f"v{pair_count}"
         freeze_audio_label = f"a{pair_count}"
@@ -180,8 +236,9 @@ def _insert_transition_freezes(
             f"trim=duration={freeze_duration:.3f},setpts=PTS-STARTPTS"
             f"[{freeze_video_label}]"
         )
+        transition_input_index = transition_input_offset + index
         filters.append(
-            f"[{index + 1}:a]atempo={NARRATION_ATEMPO:.3f},"
+            f"[{transition_input_index}:a]atempo={NARRATION_ATEMPO:.3f},"
             f"adelay={round(TRANSITION_SILENCE_SECONDS * 1000)}:all=1,apad,"
             f"atrim=duration={freeze_duration:.3f},asetpts=PTS-STARTPTS,"
             "aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo"
@@ -228,9 +285,9 @@ def _insert_transition_freezes(
             f"setpts=PTS-STARTPTS[{video_label}]"
         )
         filters.append(
-            f"[0:a]atrim=start={previous_anchor:.3f}:end={source_duration:.3f},"
-            "asetpts=PTS-STARTPTS,aresample=48000,"
-            f"aformat=sample_fmts=fltp:channel_layouts=stereo[{audio_label}]"
+            f"[sourcea{source_audio_index}]"
+            f"atrim=start={previous_anchor:.3f}:end={source_duration:.3f},"
+            f"asetpts=PTS-STARTPTS[{audio_label}]"
         )
         concat_labels.extend([f"[{video_label}]", f"[{audio_label}]"])
         pair_count += 1
@@ -279,8 +336,12 @@ def run_synthesis(job_id: str) -> dict[str, Any]:
     transitions = read_json(paths.transition_segments_json)
     narrated_segments = _narrated_segments(enriched.get("segments", []))
 
-    _mix_regular_narrations(paths, narrated_segments)
-    timeline = _insert_transition_freezes(paths, transitions)
+    timeline = _synthesize(
+        paths,
+        narrated_segments,
+        transitions,
+    )
+
     return {
         "narrated_segment_count": len(narrated_segments),
         "transition_insertion_count": len(timeline["insertions"]),
@@ -288,33 +349,3 @@ def run_synthesis(job_id: str) -> dict[str, Any]:
         "output_duration": timeline["output_duration"],
     }
 
-
-def _mux_passthrough(video_path: Path, audio_path: Path, output_path: Path) -> None:
-    command = [
-        get_ffmpeg_binary(),
-        "-y",
-        "-i",
-        str(video_path),
-        "-i",
-        str(audio_path),
-        "-filter_complex",
-        "[0:v]setpts=PTS-STARTPTS[vout];"
-        "[1:a]asetpts=PTS-STARTPTS[aout]",
-        "-map",
-        "[vout]",
-        "-map",
-        "[aout]",
-        "-c:v",
-        "libx264",
-        "-preset",
-        "medium",
-        "-crf",
-        "18",
-        "-c:a",
-        "aac",
-        "-shortest",
-        str(output_path),
-    ]
-    result = subprocess_run(command)
-    if result.returncode != 0:
-        raise RuntimeError(result.stderr)

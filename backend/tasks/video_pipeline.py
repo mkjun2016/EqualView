@@ -37,7 +37,7 @@ def process_video_job(job_id: str) -> None:
             job_id,
             status="FAILED",
             error=str(exc),
-            current_step="실패",
+            current_step="?ㅽ뙣",
         )
         raise
 
@@ -56,30 +56,36 @@ def process_face_job(
             job_id,
             face_status="PROCESSING",
             face_progress=10,
-            face_current_step="얼굴 분석 시작",
+            face_current_step="?쇨뎬 遺꾩꽍 ?쒖옉",
             face_error=None,
         )
 
         face_runner = importlib.import_module("pipeline.face_runner")
         result = face_runner.run_face_analysis(job_id, time_ranges=time_ranges)
 
+        # Voice analysis is already complete before the face task is queued.
+        # Build the first enriched timeline as soon as face analysis finishes;
+        # transition analysis is independent and must not delay this merge.
+        segment_enricher = importlib.import_module("pipeline.segment_enricher")
+        segment_enricher.finalize_segments_enriched(job_id)
+
         job_store.update(
             job_id,
             face_status="COMPLETED",
             face_progress=100,
-            face_current_step="얼굴 분석 완료",
+            face_current_step="?쇨뎬 遺꾩꽍 ?꾨즺",
             face_error=None,
             face_result=result,
             face_seconds=round(time.monotonic() - started_at, 2),
             face_sample_count=result.get("sample_count", 0),
         )
-        _run_post_processing_if_ready(job_id)
+        _run_narration_if_ready(job_id)
     except Exception as exc:
         job_store.update(
             job_id,
             face_status="FAILED",
             face_error=str(exc),
-            face_current_step="얼굴 분석 실패",
+            face_current_step="?쇨뎬 遺꾩꽍 ?ㅽ뙣",
         )
         raise
 
@@ -106,7 +112,8 @@ def process_transition_job(job_id: str) -> None:
             transition_result=result,
             transition_seconds=round(time.monotonic() - started_at, 2),
         )
-        _run_post_processing_if_ready(job_id)
+        _run_narration_if_ready(job_id)
+        _run_combine_if_ready(job_id)
     except Exception as exc:
         job_store.update(
             job_id,
@@ -116,16 +123,13 @@ def process_transition_job(job_id: str) -> None:
         raise
 
 
-def _run_post_processing_if_ready(job_id: str) -> None:
-    if not job_store.try_begin_post_processing(job_id):
+def _run_narration_if_ready(job_id: str) -> None:
+    if not job_store.try_begin_narration(job_id):
         return
 
     narration_started_at = time.monotonic()
 
     try:
-        segment_enricher = importlib.import_module("pipeline.segment_enricher")
-        segment_enricher.finalize_segments_enriched(job_id)
-
         narrator = importlib.import_module("pipeline.narrator")
         narration_result = narrator.run_narration(job_id)
     except Exception as exc:
@@ -133,7 +137,7 @@ def _run_post_processing_if_ready(job_id: str) -> None:
             job_id,
             narration_status="FAILED",
             narration_error=str(exc),
-            current_step="화면해설 생성 실패",
+            current_step="?붾㈃?댁꽕 ?앹꽦 ?ㅽ뙣",
         )
         return
 
@@ -158,9 +162,15 @@ def _run_post_processing_if_ready(job_id: str) -> None:
         narration_result=narration_result,
         narration_error=narration_error,
         narration_seconds=round(time.monotonic() - narration_started_at, 2),
-        combine_status="PROCESSING",
-        current_step="화면해설 음성 합성 중",
+        current_step="화면해설 생성 완료",
     )
+
+    _run_combine_if_ready(job_id)
+
+
+def _run_combine_if_ready(job_id: str) -> None:
+    if not job_store.try_begin_combine(job_id):
+        return
 
     combine_started_at = time.monotonic()
 
@@ -175,7 +185,7 @@ def _run_post_processing_if_ready(job_id: str) -> None:
             job_id,
             combine_status="FAILED",
             combine_error=str(exc),
-            current_step="최종 영상 합성 실패",
+            current_step="理쒖쥌 ?곸긽 ?⑹꽦 ?ㅽ뙣",
         )
         return
 
@@ -184,5 +194,6 @@ def _run_post_processing_if_ready(job_id: str) -> None:
         combine_status="COMPLETED",
         combine_result={**tts_result, **synthesis_result},
         combine_seconds=round(time.monotonic() - combine_started_at, 2),
-        current_step="처리 완료",
+        current_step="泥섎━ ?꾨즺",
     )
+

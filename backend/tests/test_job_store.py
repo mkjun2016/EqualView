@@ -1,6 +1,6 @@
 import pytest
 
-from services.job_store import FileJobStore, is_post_processing_ready
+from services.job_store import FileJobStore, is_combine_ready, is_narration_ready
 from utils.json_io import atomic_write_json
 from utils.paths import JobPaths
 
@@ -19,7 +19,7 @@ def _ready_job(extra: dict | None = None) -> dict:
         "job_id": JOB_ID,
         "status": "COMPLETED",
         "face_status": "COMPLETED",
-        "transition_status": "COMPLETED",
+        "transition_status": "PROCESSING",
         "narration_status": "PENDING",
         "combine_status": "PENDING",
     }
@@ -28,31 +28,56 @@ def _ready_job(extra: dict | None = None) -> dict:
     return data
 
 
-def test_is_post_processing_ready():
-    assert is_post_processing_ready(_ready_job()) is True
-    assert is_post_processing_ready(_ready_job({"face_status": "PROCESSING"})) is False
-    assert is_post_processing_ready(_ready_job({"narration_status": "PROCESSING"})) is False
+def test_is_narration_ready_waits_for_transition_context():
+    assert is_narration_ready(_ready_job()) is False
+    assert is_narration_ready(
+        _ready_job({"transition_status": "COMPLETED"})
+    ) is True
+    assert is_narration_ready(_ready_job({"face_status": "PROCESSING"})) is False
+    assert is_narration_ready(_ready_job({"narration_status": "PROCESSING"})) is False
 
 
-def test_try_begin_post_processing_claims_once(store):
+def test_try_begin_narration_claims_once(store):
     paths = JobPaths(JOB_ID)
     paths.job_dir.mkdir(parents=True, exist_ok=True)
-    atomic_write_json(paths.job_json, _ready_job())
+    atomic_write_json(
+        paths.job_json,
+        _ready_job({"transition_status": "COMPLETED"}),
+    )
 
-    assert store.try_begin_post_processing(JOB_ID) is True
-    assert store.try_begin_post_processing(JOB_ID) is False
+    assert store.try_begin_narration(JOB_ID) is True
+    assert store.try_begin_narration(JOB_ID) is False
 
     job_data = store.get(JOB_ID)
     assert job_data["narration_status"] == "PROCESSING"
     assert job_data["current_step"] == "화면해설 생성 중"
 
 
-def test_try_begin_post_processing_waits_for_face(store):
+def test_try_begin_narration_waits_for_face(store):
     paths = JobPaths(JOB_ID)
     paths.job_dir.mkdir(parents=True, exist_ok=True)
     atomic_write_json(
         paths.job_json,
-        _ready_job({"status": "COMPLETED", "face_status": "PROCESSING"}),
+        _ready_job(
+            {
+                "status": "COMPLETED",
+                "face_status": "PROCESSING",
+                "transition_status": "COMPLETED",
+            }
+        ),
     )
 
-    assert store.try_begin_post_processing(JOB_ID) is False
+    assert store.try_begin_narration(JOB_ID) is False
+
+
+def test_combine_waits_for_transition_and_finished_narration():
+    ready = _ready_job(
+        {
+            "transition_status": "COMPLETED",
+            "narration_status": "COMPLETED",
+            "narration_result": {},
+        }
+    )
+    assert is_combine_ready(ready) is True
+    assert is_combine_ready({**ready, "transition_status": "PROCESSING"}) is False
+    assert is_combine_ready({**ready, "narration_result": None}) is False
