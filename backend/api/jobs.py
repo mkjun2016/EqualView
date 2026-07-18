@@ -40,14 +40,16 @@ async def create_job(file: UploadFile = File(...)):
             "face_error": None,
             "transition_status": "PENDING",
             "transition_error": None,
+            "enrichment_status": "PENDING",
+            "enrichment_error": None,
             "narration_status": "PENDING",
             "combine_status": "PENDING",
         },
     )
 
-    # Voice and whole-video Gemini analysis start together. Voice determines
-    # the non-speech ranges and queues face analysis after it completes.
+    # Voice, face, and whole-video transition analysis run independently.
     celery_app.send_task("tasks.process_video_job", args=[job_id])
+    celery_app.send_task("tasks.process_face_job", args=[job_id])
     celery_app.send_task("tasks.process_transition_job", args=[job_id])
 
     return {"job_id": job_id, "status": "PENDING"}

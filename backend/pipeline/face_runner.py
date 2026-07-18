@@ -72,7 +72,6 @@ def run_face_analysis(
             last_processed_timestamp=last_processed_timestamp,
             last_sample_candidate_timestamp=last_sample_candidate_timestamp,
             last_saved_timestamp=last_saved_timestamp,
-            analyzed_ranges=analyzed_ranges,
             tracker=tracker,
         )
         atomic_write_json(paths.face_segments_json, result)
@@ -177,7 +176,6 @@ def run_face_analysis(
         last_processed_timestamp=last_processed_timestamp,
         last_sample_candidate_timestamp=last_sample_candidate_timestamp,
         last_saved_timestamp=last_saved_timestamp,
-        analyzed_ranges=analyzed_ranges,
         tracker=tracker,
     )
 
@@ -207,7 +205,6 @@ def _build_face_segments_result(
     last_processed_timestamp: float,
     last_sample_candidate_timestamp: float | None,
     last_saved_timestamp: float | None,
-    analyzed_ranges: list[dict[str, float]],
     tracker: FaceTracker,
 ) -> dict[str, Any]:
     duration_gap = max(0.0, duration - last_processed_timestamp)
@@ -239,7 +236,6 @@ def _build_face_segments_result(
                 else None
             ),
             "duration_gap": round(duration_gap, 3),
-            "analyzed_ranges": analyzed_ranges,
             "sampling_mode": "ffmpeg_seek",
         },
         "samples": samples,

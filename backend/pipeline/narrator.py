@@ -49,10 +49,22 @@ _client: genai.Client | None = None
 
 
 @dataclass
+class NarrationFrame:
+    role: str
+    segment_id: str
+    timestamp: float
+    path: Path
+
+
+@dataclass
 class NarrationJob:
     segment: dict[str, Any]
     frame_paths: list[Path]
     prompt: str
+    frames: list[NarrationFrame] | None = None
+
+
+NARRATION_CONTEXT_FRAME_COUNT = 3
 
 
 def get_gemini_client() -> genai.Client:
@@ -252,25 +264,35 @@ def _build_prompt(
 
     return (
         "You are writing Korean audio description for visually impaired film "
-        "viewers. The supplied images are chronological frames from a silent "
-        f"interval lasting {duration} seconds.\n\n"
+        "viewers. The supplied images are chronological video frames grouped "
+        "as previous_context, target_silent_segment, and next_context. A group "
+        "may contain fewer than three frames or no frames; this is normal. Use "
+        "previous_context and next_context to understand continuity. Base "
+        "the audio description on target_silent_segment, do not treat events "
+        "shown only in the context groups as if they occurred in the target "
+        f"silent interval lasting {duration} seconds, and never invent missing "
+        "visual information.\n\n"
         f"{people_line}\n\n"
         f"{prior_line}\n\n"
         f"{upcoming_line}\n\n"
-        "Write one concise and natural Korean audio-description sentence that "
-        f"can be spoken comfortably within {duration} seconds. Use no more "
-        f"than {max_chars} Korean characters, excluding spaces. Prioritize "
-        "essential screen information in this order: the main visible action, "
-        "the people involved, and the setting or a meaningful visual change. "
-        "Remove decorative detail before removing essential information. "
+        "Write concise and natural Korean audio description that can be spoken "
+        f"comfortably within {duration} seconds. Use no more "
+        f"than {max_chars} Korean characters, excluding spaces. Focus on the "
+        "visible action, the people involved, and the setting or a meaningful "
+        "visual change. "
+        #  "Remove decorative detail before removing essential information. " #
         "Describe only "
         "visually observable actions, expressions, people, objects, setting, "
-        "and meaningful atmosphere changes. Connect naturally with the nearby "
+        "and meaningful atmosphere changes. Prefer wording grounded in what "
+        "the target frames confirm. If the surrounding context suggests a "
+        "likely next action, avoid presenting it as completed unless it is "
+        "visible in the target frames. When the outcome is unclear, describe "
+        "the visible state or ongoing movement. Connect naturally with the nearby "
         "dialogue without repeating it. Never output tracking identifiers such "
         "as person_001; refer to people naturally by visible traits such as a "
         "man, a woman, or a person in specific clothing. Do not infer names, "
         "relationships, motives, or facts that are not visible. Output only the "
-        "final Korean narration sentence with no labels or explanation."
+        "Korean narration text with no labels or explanation."
     )
 
 
@@ -295,28 +317,99 @@ def _prepare_narration_jobs(
     dialogue_segments = _dialogue_segments(segments)
     jobs: list[NarrationJob] = []
 
-    for segment in segments:
+    timestamps = [float(sample["timestamp"]) for sample in sorted_samples]
+
+    for segment_index, segment in enumerate(segments):
         if not (
             segment.get("narration_safe")
             or segment.get("narration_candidate")
         ):
             continue
 
-        frame_start, frame_end = _frame_selection_range(segment, video_duration)
-        frames = _select_frames(
-            sorted_samples,
-            frame_start,
-            frame_end,
+        start = float(segment["start"])
+        end = float(segment["end"])
+        left = bisect.bisect_left(timestamps, start)
+        if segment_index == len(segments) - 1:
+            right = bisect.bisect_right(timestamps, end)
+        else:
+            right = bisect.bisect_left(timestamps, end)
+
+        target_candidates = sorted_samples[left:right]
+        target_frames = _select_frames(
+            target_candidates,
+            start,
+            end,
             NARRATION_FRAMES_PER_SEGMENT,
         )
+        previous_frames = sorted_samples[
+            max(0, left - NARRATION_CONTEXT_FRAME_COUNT):left
+        ]
+        next_frames = sorted_samples[
+            right:right + NARRATION_CONTEXT_FRAME_COUNT
+        ]
 
-        segment["narration_frame_paths"] = [frame["path"] for frame in frames]
-
-        if not frames:
+        if not target_frames:
+            segment["narration_frame_paths"] = []
+            segment["narration_frame_groups"] = {
+                "previous_context": [],
+                "target_silent_segment": [],
+                "next_context": [],
+            }
             segment["narration"] = ""
             continue
 
-        person_ids = _visible_person_ids(frames)
+        grouped_samples = {
+            "previous_context": previous_frames,
+            "target_silent_segment": target_frames,
+            "next_context": next_frames,
+        }
+        narration_frames: list[NarrationFrame] = []
+        valid_samples: dict[str, list[dict[str, Any]]] = {
+            role: [] for role in grouped_samples
+        }
+
+        for role, frames in grouped_samples.items():
+            for frame in frames:
+                frame_path = Path(frame["path"])
+                if frame_path.parts and frame_path.parts[0] == "uploads":
+                    frame_path = job_dir.parent.parent / frame_path
+                else:
+                    frame_path = job_dir / frame_path
+
+                if not frame_path.exists():
+                    continue
+
+                valid_samples[role].append(frame)
+                narration_frames.append(
+                    NarrationFrame(
+                        role=role,
+                        segment_id=str(frame.get("_segment_id") or "unknown"),
+                        timestamp=float(frame["timestamp"]),
+                        path=frame_path,
+                    )
+                )
+
+        if not valid_samples["target_silent_segment"]:
+            segment["narration_frame_paths"] = []
+            segment["narration_frame_groups"] = {
+                role: [] for role in grouped_samples
+            }
+            segment["narration"] = ""
+            continue
+
+        segment["narration_frame_paths"] = [
+            str(frame["path"])
+            for role in grouped_samples
+            for frame in valid_samples[role]
+        ]
+        segment["narration_frame_groups"] = {
+            role: [str(frame["path"]) for frame in valid_samples[role]]
+            for role in grouped_samples
+        }
+
+        person_ids = _visible_person_ids(
+            valid_samples["target_silent_segment"]
+        )
         prior_dialogue, upcoming_dialogue = _dialogue_context(
             dialogue_segments,
             segment["start"],
@@ -329,20 +422,13 @@ def _prepare_narration_jobs(
             prior_dialogue,
             upcoming_dialogue,
         )
-        frame_paths = []
-        for frame in frames:
-            frame_path = Path(frame["path"])
-            if frame_path.parts and frame_path.parts[0] == "uploads":
-                frame_path = job_dir.parent.parent / frame_path
-            else:
-                frame_path = job_dir / frame_path
-            frame_paths.append(frame_path)
 
         jobs.append(
             NarrationJob(
                 segment=segment,
-                frame_paths=frame_paths,
+                frame_paths=[frame.path for frame in narration_frames],
                 prompt=prompt,
+                frames=narration_frames,
             )
         )
 
@@ -368,7 +454,38 @@ def _split_contiguous_chunks(
 
 def _send_chat_narration(chat: Any, job: NarrationJob) -> str:
     message: list[Any] = [job.prompt]
-    message.extend(_frame_part(path) for path in job.frame_paths)
+    if job.frames is None:
+        message.extend(_frame_part(path) for path in job.frame_paths)
+    else:
+        roles = (
+            "previous_context",
+            "target_silent_segment",
+            "next_context",
+        )
+        counts = {
+            role: sum(1 for frame in job.frames if frame.role == role)
+            for role in roles
+        }
+        message.append(
+            "FRAME_GROUP_SUMMARY\n"
+            + "\n".join(f"{role}: {counts[role]} frames" for role in roles)
+        )
+
+        for role in roles:
+            grouped_frames = [frame for frame in job.frames if frame.role == role]
+            message.append(f"=== {role.upper()} ===")
+            if not grouped_frames:
+                message.append("No frames are available for this group.")
+                continue
+
+            for frame in grouped_frames:
+                message.append(
+                    "FRAME_METADATA\n"
+                    f"role: {frame.role}\n"
+                    f"segment_id: {frame.segment_id}\n"
+                    f"timestamp: {frame.timestamp}"
+                )
+                message.append(_frame_part(frame.path))
     last_error: Exception | None = None
 
     for attempt in range(NARRATION_MAX_RETRIES + 1):
@@ -385,10 +502,12 @@ def _send_chat_narration(chat: Any, job: NarrationJob) -> str:
                 response = chat.send_message(
                     "Shorten your previous Korean narration to no more than "
                     f"{max_chars} Korean characters excluding spaces. Preserve "
-                    "the essential screen information in this order: the main "
-                    "visible action, the people involved, then the setting or "
-                    "meaningful visual change. Remove secondary detail. Output "
-                    "only the revised Korean narration sentence."
+                    "the main visible action, the people involved, and the "
+                    "setting or meaningful visual change as equally important "
+                    "screen information. Remove only decorative or redundant "
+                    "detail without adding an outcome that the target frames "
+                    "do not confirm. Output the revised Korean narration text with no "
+                    "labels or explanation."
                 )
                 narration = (response.text or "").strip()
 
@@ -427,7 +546,9 @@ def _run_chat_chunk(
         "descriptions must complement, rather than repeat, information already "
         "covered by a nearby transition description. Focus regular narration "
         "on visible actions, people, expressions, and other essential details "
-        "that the transition description does not cover. "
+        "that the transition description does not cover. Use later timeline "
+        "events as context, while avoiding wording that makes them sound as if "
+        "they already occurred in an earlier target interval. "
         "Do not generate narration yet. Reply only with CONTEXT_READY.\n\n"
         f"{timeline_context}"
     )
@@ -523,7 +644,10 @@ def run_narration(job_id: str) -> dict[str, Any]:
         for frame in segment.get("frames", []):
             frame_id = frame.get("frame_id") or frame.get("path")
             if frame_id:
-                samples_by_id[str(frame_id)] = frame
+                samples_by_id[str(frame_id)] = {
+                    **frame,
+                    "_segment_id": segment.get("segment_id"),
+                }
     samples = list(samples_by_id.values())
 
     sorted_samples = sorted(samples, key=lambda sample: sample["timestamp"])

@@ -8,7 +8,6 @@ from pipeline.audio_extractor import (
     extract_audio_from_video,
 )
 from pipeline.transcriber import build_segments_from_words, transcribe_audio
-from pipeline.face_ranges import build_non_speech_time_ranges
 from utils.ffmpeg_paths import MediaProbeInfo, probe_media_info
 from utils.json_io import atomic_write_json
 from utils.paths import JobPaths
@@ -102,11 +101,6 @@ def run_analysis(job_id: str, store: JobStore) -> dict:
         },
     )
 
-    face_time_ranges = build_non_speech_time_ranges(
-        segments,
-        context.duration,
-    )
-
     store.update(
         job_id,
         status="COMPLETED",
@@ -114,7 +108,6 @@ def run_analysis(job_id: str, store: JobStore) -> dict:
         current_step="분석 완료",
         error=None,
         dialogue_seconds=round(time.monotonic() - started_at, 2),
-        face_analyzed_ranges=face_time_ranges,
     )
 
     return {
@@ -124,5 +117,4 @@ def run_analysis(job_id: str, store: JobStore) -> dict:
         "narration_candidate_count": sum(
             1 for segment in segments if segment.get("narration_safe")
         ),
-        "face_time_ranges": face_time_ranges,
     }

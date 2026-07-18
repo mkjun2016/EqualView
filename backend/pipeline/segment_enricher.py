@@ -6,7 +6,7 @@ from utils.paths import JobPaths
 
 DEFAULT_SETTINGS = {
     "narration_min_duration": 3.0,
-    "frame_interval": 0.5,
+    "frame_interval": 1.2,
     "max_frames_per_segment": 10,
     "language": "ko",
     "pipeline_version": "mvp2",
@@ -204,9 +204,6 @@ def _apply_face_frames_to_segments(
     max_frames_per_segment: int,
 ) -> dict[str, Any]:
     for segment in enriched.get("segments", []):
-        if segment.get("audio_type") != "non_speech":
-            continue
-
         start = float(segment["start"])
         end = float(segment["end"])
         matching = [

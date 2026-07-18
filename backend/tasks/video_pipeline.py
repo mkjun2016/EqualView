@@ -25,13 +25,9 @@ def process_video_job(job_id: str) -> None:
     try:
         _ensure_backend_path()
         runner = importlib.import_module("pipeline.runner")
-        result = runner.run_analysis(job_id, job_store)
-
-        celery_app.send_task(
-            "tasks.process_face_job",
-            args=[job_id],
-            kwargs={"time_ranges": result["face_time_ranges"]},
-        )
+        runner.run_analysis(job_id, job_store)
+        _run_enrichment_if_ready(job_id)
+        _run_narration_if_ready(job_id)
     except Exception as exc:
         job_store.update(
             job_id,
@@ -43,10 +39,7 @@ def process_video_job(job_id: str) -> None:
 
 
 @celery_app.task(name="tasks.process_face_job")
-def process_face_job(
-    job_id: str,
-    time_ranges: list[dict[str, float]] | None = None,
-) -> None:
+def process_face_job(job_id: str) -> None:
     started_at = time.monotonic()
 
     try:
@@ -61,13 +54,7 @@ def process_face_job(
         )
 
         face_runner = importlib.import_module("pipeline.face_runner")
-        result = face_runner.run_face_analysis(job_id, time_ranges=time_ranges)
-
-        # Voice analysis is already complete before the face task is queued.
-        # Build the first enriched timeline as soon as face analysis finishes;
-        # transition analysis is independent and must not delay this merge.
-        segment_enricher = importlib.import_module("pipeline.segment_enricher")
-        segment_enricher.finalize_segments_enriched(job_id)
+        result = face_runner.run_face_analysis(job_id)
 
         job_store.update(
             job_id,
@@ -79,6 +66,7 @@ def process_face_job(
             face_seconds=round(time.monotonic() - started_at, 2),
             face_sample_count=result.get("sample_count", 0),
         )
+        _run_enrichment_if_ready(job_id)
         _run_narration_if_ready(job_id)
     except Exception as exc:
         job_store.update(
@@ -121,6 +109,28 @@ def process_transition_job(job_id: str) -> None:
             transition_error=str(exc),
         )
         raise
+
+
+def _run_enrichment_if_ready(job_id: str) -> None:
+    if not job_store.try_begin_enrichment(job_id):
+        return
+
+    try:
+        segment_enricher = importlib.import_module("pipeline.segment_enricher")
+        segment_enricher.finalize_segments_enriched(job_id)
+    except Exception as exc:
+        job_store.update(
+            job_id,
+            enrichment_status="FAILED",
+            enrichment_error=str(exc),
+        )
+        return
+
+    job_store.update(
+        job_id,
+        enrichment_status="COMPLETED",
+        enrichment_error=None,
+    )
 
 
 def _run_narration_if_ready(job_id: str) -> None:
@@ -196,4 +206,3 @@ def _run_combine_if_ready(job_id: str) -> None:
         combine_seconds=round(time.monotonic() - combine_started_at, 2),
         current_step="泥섎━ ?꾨즺",
     )
-

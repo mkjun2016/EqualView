@@ -1,6 +1,11 @@
 import pytest
 
-from services.job_store import FileJobStore, is_combine_ready, is_narration_ready
+from services.job_store import (
+    FileJobStore,
+    is_combine_ready,
+    is_enrichment_ready,
+    is_narration_ready,
+)
 from utils.json_io import atomic_write_json
 from utils.paths import JobPaths
 
@@ -20,6 +25,7 @@ def _ready_job(extra: dict | None = None) -> dict:
         "status": "COMPLETED",
         "face_status": "COMPLETED",
         "transition_status": "PROCESSING",
+        "enrichment_status": "COMPLETED",
         "narration_status": "PENDING",
         "combine_status": "PENDING",
     }
@@ -33,7 +39,14 @@ def test_is_narration_ready_waits_for_transition_context():
     assert is_narration_ready(
         _ready_job({"transition_status": "COMPLETED"})
     ) is True
-    assert is_narration_ready(_ready_job({"face_status": "PROCESSING"})) is False
+    assert is_narration_ready(
+        _ready_job(
+            {
+                "transition_status": "COMPLETED",
+                "enrichment_status": "PROCESSING",
+            }
+        )
+    ) is False
     assert is_narration_ready(_ready_job({"narration_status": "PROCESSING"})) is False
 
 
@@ -53,21 +66,25 @@ def test_try_begin_narration_claims_once(store):
     assert job_data["current_step"] == "화면해설 생성 중"
 
 
-def test_try_begin_narration_waits_for_face(store):
+def test_try_begin_enrichment_waits_for_voice_and_face(store):
     paths = JobPaths(JOB_ID)
     paths.job_dir.mkdir(parents=True, exist_ok=True)
     atomic_write_json(
         paths.job_json,
         _ready_job(
             {
-                "status": "COMPLETED",
                 "face_status": "PROCESSING",
-                "transition_status": "COMPLETED",
+                "enrichment_status": "PENDING",
             }
         ),
     )
 
-    assert store.try_begin_narration(JOB_ID) is False
+    assert is_enrichment_ready(store.get(JOB_ID)) is False
+    assert store.try_begin_enrichment(JOB_ID) is False
+
+    store.update(JOB_ID, face_status="COMPLETED")
+    assert store.try_begin_enrichment(JOB_ID) is True
+    assert store.try_begin_enrichment(JOB_ID) is False
 
 
 def test_combine_waits_for_transition_and_finished_narration():

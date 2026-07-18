@@ -13,6 +13,7 @@ from config import (
     TRANSITION_FILE_TIMEOUT_SECONDS,
     TRANSITION_GEMINI_MODEL,
 )
+from utils.ffmpeg_paths import MediaProbeInfo, probe_media_info
 from utils.json_io import atomic_write_json
 from utils.paths import JobPaths
 
@@ -44,8 +45,9 @@ _TRANSITION_SCHEMA = {
 _PROMPT = """
 You are analyzing an entire chronological video. Divide it into a small number
 of meaningful sections based primarily on changes in physical location or
-environment, such as a restaurant, hallway, street, office, bathroom, house,
-or vehicle.
+environment, such as a restaurant, hallway, street, office, forest, house,
+or vehicle. Since the provided video may be science fiction, the setting could be 
+an unknown planet or an unfamiliar location that is difficult to identify, like some sort of planet. 
 
 Create a new scene when one or more of the following occurs:
 - The physical location clearly changes.
@@ -67,32 +69,72 @@ Prefer stable, broad location sections over detailed shot-by-shot divisions.
 Pay attention to short scenes: report a short scene when it genuinely uses a
 different physical environment.
 
-For transition_segment_description, introduce the opening of the new segment
-like a concise description of a movie scene. In no more than two sentences,
-describe the visible people first: how many are present, their noticeable
-appearance or clothing, where they are positioned, and what they are doing.
-Then describe the surrounding environment, including its spatial layout,
-prominent objects, lighting, weather, or atmosphere when visibly relevant.
-Be visually specific rather than generic, but describe only evidence visible
-on screen. Do not identify characters by name or infer motives, emotions,
-relationships, occupations, or events that are not clearly shown.
+For `transition_segment_description`, write a concise, 
+movie-like description that introduces the opening of the new segment.
 
-Do not add a scene-change phrase to the first scene description at the start of
+Begin with the visible people. Describe:
+- how many people are present,
+- their noticeable appearance or clothing,
+- where they are positioned,
+- and what they are doing.
 
+Then describe the surrounding environment. Include, when visibly relevant:
+- the spatial layout,
+- prominent objects,
+- lighting,
+- weather,
+- atmosphere,
+- and other visible on-screen details.
 
-the video. Every transition_segment_description after the first scene must begin
-with the exact Korean phrase "장면이 바뀌고" and continue as one natural Korean
-audio-description sentence. When visually supported, state which previous setting the video leaves
-and which new setting it enters. 
+Be visually specific rather than generic. 
+If the mood or atmosphere of the scene can be reasonably inferred from what is shown, include it as well.
+When visually supported, state which previous setting the video leaves and which new setting it enters.
+Do not invent details or make random guesses when the scene is unclear. 
+Do not identify characters by name or infer motives, emotions, relationships, occupations, or events that are not clearly shown.
 
 Write both transition_segment_description and location in Korean. The
 transition_segment_description must always be a natural Korean narration that
 can be read aloud directly without translation or rewriting.
 
-For each detected scene return its estimated start and end timestamps, a short
-location label, one concise visual description, the reason it differs from the
-previous scene, confidence from 0.0 to 1.0, and whether its start boundary needs
-more precise frame analysis. Return valid JSON only.
+For each detected scene return its anchor_timestamp at the estimated first
+visible moment of that scene, a short location label, and one visual
+description. Return valid JSON only and exactly follow the provided schema.
+""".strip()
+
+
+def _format_duration(duration: float) -> str:
+    total_milliseconds = max(0, round(duration * 1000))
+    hours, remainder = divmod(total_milliseconds, 3_600_000)
+    minutes, remainder = divmod(remainder, 60_000)
+    seconds = remainder / 1000
+    return f"{hours:02d}:{minutes:02d}:{seconds:06.3f}"
+
+
+def _build_video_context_prompt(media_info: MediaProbeInfo) -> str:
+    metadata = media_info.metadata
+    duration = float(media_info.duration)
+    fps = metadata.get("fps")
+    width = metadata.get("width")
+    height = metadata.get("height")
+
+    return f"""
+Authoritative source-video metadata measured from the uploaded input:
+- Exact playback duration: {duration:.3f} seconds
+- Duration in HH:MM:SS.mmm: {_format_duration(duration)}
+- Resolution: {width or "unknown"}x{height or "unknown"}
+- Frame rate: {fps if fps is not None else "unknown"} fps
+- Audio stream present: {"yes" if media_info.has_audio else "no"}
+
+Timestamp rules:
+- Interpret anchor_timestamp only as elapsed seconds from the very first frame.
+- Return it as a JSON number in seconds, not as MM:SS, HH:MM:SS, a frame
+  number, or a percentage.
+- Every anchor_timestamp must be within the inclusive range
+  0.000 through {duration:.3f}.
+- The uploaded file ends at {duration:.3f} seconds. There is no visual content
+  after that time; never extrapolate, wrap, or invent a timestamp beyond it.
+- Keep scenes in chronological order. When a boundary is uncertain, give the
+  closest estimate that is still within the stated range.
 """.strip()
 
 
@@ -147,6 +189,8 @@ def run_scene_transition_analysis(job_id: str) -> dict[str, Any]:
 
     paths = JobPaths(job_id)
     video_path = paths.find_input_video()
+    media_info = probe_media_info(video_path)
+    video_context_prompt = _build_video_context_prompt(media_info)
     client = genai.Client(api_key=GEMINI_API_KEY)
     uploaded_file = None
 
@@ -156,7 +200,7 @@ def run_scene_transition_analysis(job_id: str) -> dict[str, Any]:
 
         response = client.models.generate_content(
             model=TRANSITION_GEMINI_MODEL,
-            contents=[uploaded_file, _PROMPT],
+            contents=[uploaded_file, _PROMPT, video_context_prompt],
             config=types.GenerateContentConfig(
                 system_instruction=(
                     "Write all scene-analysis results in Korean. Keep every "

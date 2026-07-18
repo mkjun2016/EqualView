@@ -43,10 +43,17 @@ def _utc_now() -> str:
 
 def is_narration_ready(job_data: dict[str, Any]) -> bool:
     return (
-        job_data.get("status") == "COMPLETED"
-        and job_data.get("face_status") == "COMPLETED"
+        job_data.get("enrichment_status") == "COMPLETED"
         and job_data.get("transition_status") == "COMPLETED"
         and job_data.get("narration_status", "PENDING") == "PENDING"
+    )
+
+
+def is_enrichment_ready(job_data: dict[str, Any]) -> bool:
+    return (
+        job_data.get("status") == "COMPLETED"
+        and job_data.get("face_status") == "COMPLETED"
+        and job_data.get("enrichment_status", "PENDING") == "PENDING"
     )
 
 
@@ -132,8 +139,7 @@ class FileJobStore(JobStore):
     def try_begin_narration(self, job_id: str) -> bool:
         """
         Start Gemini narration once enriched and transition context are ready.
-        The face task creates enriched_segments.json before marking itself complete.
-        Both timelines are combined only in the Gemini request context.
+        Voice and face are merged independently once both analyses complete.
         """
         paths = JobPaths(job_id)
         if not paths.job_json.exists():
@@ -149,6 +155,35 @@ class FileJobStore(JobStore):
 
                 job_data["narration_status"] = "PROCESSING"
                 job_data["current_step"] = "화면해설 생성 중"
+                job_data["updated_at"] = _utc_now()
+
+                handle.seek(0)
+                json.dump(
+                    to_json_safe(job_data),
+                    handle,
+                    ensure_ascii=False,
+                    indent=2,
+                )
+                handle.truncate()
+                handle.flush()
+                return True
+
+    def try_begin_enrichment(self, job_id: str) -> bool:
+        """Claim the voice/face merge once both independent tasks finish."""
+        paths = JobPaths(job_id)
+        if not paths.job_json.exists():
+            return False
+
+        with open(paths.job_json, "r+", encoding="utf-8") as handle:
+            with _exclusive_file_lock(handle):
+                handle.seek(0)
+                job_data = json.load(handle)
+
+                if not is_enrichment_ready(job_data):
+                    return False
+
+                job_data["enrichment_status"] = "PROCESSING"
+                job_data["enrichment_error"] = None
                 job_data["updated_at"] = _utc_now()
 
                 handle.seek(0)
