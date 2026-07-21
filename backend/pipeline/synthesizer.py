@@ -9,19 +9,21 @@ from utils.paths import JobPaths
 
 
 NARRATION_ATEMPO = 1.1
-TRANSITION_SILENCE_SECONDS = 0.5
+REGULAR_NARRATION_OFFSET_SECONDS = 0.2
+TRANSITION_SILENCE_SECONDS = 0.7
 
 
 def _narrated_segments(segments: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [
         segment
         for segment in segments
-        if segment.get("narration_candidate") and segment.get("narration_audio")
+        if segment.get("narration_audio")
+        and float(segment.get("narration_audio_duration") or 0) > 0
     ]
 
 
 def _source_duration(paths: JobPaths) -> float:
-    """Match the legacy first pass, which ends at the shortest base input."""
+    """Use the shortest base stream so video and source audio stay aligned."""
     video_duration = float(probe_media_info(paths.find_input_video()).duration)
     audio_duration = float(probe_media_info(paths.audio_wav).duration)
     positive_durations = [
@@ -36,78 +38,105 @@ def _valid_transitions(
     transition_data: dict[str, Any],
     source_duration: float,
 ) -> list[dict[str, Any]]:
-    transitions = sorted(
-        (
-            item
-            for item in transition_data.get("scenes", [])
-            if item.get("tts_audio") and float(item.get("tts_duration") or 0) > 0
-        ),
-        key=lambda item: float(
-            item.get("insertion_timestamp", item["anchor_timestamp"])
-        ),
-    )
+    transitions = [
+        item
+        for item in transition_data.get("scenes", [])
+        if item.get("tts_audio") and float(item.get("tts_duration") or 0) > 0
+    ]
 
-    valid: list[dict[str, Any]] = []
-    last_anchor = -1.0
     latest_frame_anchor = max(0.0, source_duration - 0.04)
-    for transition in transitions:
+    valid: list[dict[str, Any]] = []
+    for source_order, transition in enumerate(transitions):
         insertion_timestamp = float(
             transition.get("insertion_timestamp", transition["anchor_timestamp"])
         )
-        anchor = min(latest_frame_anchor, max(0.0, insertion_timestamp))
-        if anchor < last_anchor - 0.001:
-            continue
-        valid.append({**transition, "insertion_timestamp": anchor})
-        last_anchor = anchor
-
+        valid.append(
+            {
+                **transition,
+                "insertion_timestamp": min(
+                    latest_frame_anchor,
+                    max(0.0, insertion_timestamp),
+                ),
+                "_source_order": source_order,
+                "_original_item": transition,
+            }
+        )
     return valid
 
 
-def _regular_audio_mix_filters(
+def _build_insertion_events(
     segments: list[dict[str, Any]],
-) -> list[str]:
-    filters = [
-        "[1:a]asetpts=PTS-STARTPTS,aresample=48000,"
-        "aformat=sample_fmts=fltp:channel_layouts=stereo[abase]"
-    ]
-    mix_labels = ["abase"]
+    transitions: list[dict[str, Any]],
+    source_duration: float,
+) -> list[dict[str, Any]]:
+    latest_frame_anchor = max(0.0, source_duration - 0.04)
+    events: list[dict[str, Any]] = []
 
-    for index, segment in enumerate(segments):
-        input_index = index + 2
-        narration_start = float(
-            segment.get("narration_start_timestamp", segment["start"])
+    for source_order, segment in enumerate(segments):
+        anchor = min(
+            latest_frame_anchor,
+            max(
+                0.0,
+                float(segment["start"]) + REGULAR_NARRATION_OFFSET_SECONDS,
+            ),
         )
-        delay_ms = round(narration_start * 1000)
-        label = f"regular{index}"
-        filters.append(
-            f"[{input_index}:a]atempo={NARRATION_ATEMPO:.3f},"
-            "asetpts=PTS-STARTPTS,"
-            f"adelay={delay_ms}:all=1,aresample=48000,"
-            "aformat=sample_fmts=fltp:channel_layouts=stereo"
-            f"[{label}]"
+        spoken_duration = (
+            float(segment["narration_audio_duration"]) / NARRATION_ATEMPO
         )
-        mix_labels.append(label)
+        events.append(
+            {
+                "kind": "regular",
+                "source_timestamp": anchor,
+                "priority": 1,
+                "source_order": source_order,
+                "spoken_duration": spoken_duration,
+                "leading_silence": 0.0,
+                "trailing_silence": 0.0,
+                "inserted_duration": spoken_duration,
+                "audio_path": segment["narration_audio"],
+                "source_item": segment,
+            }
+        )
 
-    if len(mix_labels) == 1:
-        filters.append("[abase]anull[amixed]")
-        return filters
+    for transition in transitions:
+        anchor = float(transition["insertion_timestamp"])
+        spoken_duration = float(transition["tts_duration"]) / NARRATION_ATEMPO
+        inserted_duration = (
+            spoken_duration + (TRANSITION_SILENCE_SECONDS * 2)
+        )
+        events.append(
+            {
+                "kind": "transition",
+                "source_timestamp": anchor,
+                "priority": 0,
+                "source_order": int(transition["_source_order"]),
+                "spoken_duration": spoken_duration,
+                "leading_silence": TRANSITION_SILENCE_SECONDS,
+                "trailing_silence": TRANSITION_SILENCE_SECONDS,
+                "inserted_duration": inserted_duration,
+                "audio_path": transition["tts_audio"],
+                "source_item": transition["_original_item"],
+            }
+        )
 
-    mix_inputs = "".join(f"[{label}]" for label in mix_labels)
-    filters.append(
-        f"{mix_inputs}amix=inputs={len(mix_labels)}:duration=first:"
-        "dropout_transition=0:normalize=0[amixed]"
+    return sorted(
+        events,
+        key=lambda event: (
+            event["source_timestamp"],
+            event["priority"],
+            event["source_order"],
+        ),
     )
-    return filters
 
 
 def _count_source_audio_chunks(
-    transitions: list[dict[str, Any]],
+    events: list[dict[str, Any]],
     source_duration: float,
 ) -> int:
     count = 0
     previous_anchor = 0.0
-    for transition in transitions:
-        anchor = float(transition["insertion_timestamp"])
+    for event in events:
+        anchor = float(event["source_timestamp"])
         if anchor > previous_anchor + 0.001:
             count += 1
         previous_anchor = anchor
@@ -116,7 +145,7 @@ def _count_source_audio_chunks(
     return count
 
 
-def _write_empty_transition_timeline(
+def _write_empty_timeline(
     paths: JobPaths,
     source_duration: float,
 ) -> dict[str, Any]:
@@ -130,15 +159,121 @@ def _write_empty_transition_timeline(
     return timeline
 
 
+def _append_source_audio_filters(
+    filters: list[str],
+    source_audio_chunks: int,
+) -> None:
+    base_audio = (
+        "[1:a]asetpts=PTS-STARTPTS,aresample=48000,"
+        "aformat=sample_fmts=fltp:channel_layouts=stereo"
+    )
+    if source_audio_chunks == 1:
+        filters.append(f"{base_audio}[sourcea0]")
+        return
+
+    split_outputs = "".join(
+        f"[sourcea{index}]" for index in range(source_audio_chunks)
+    )
+    filters.append(
+        f"{base_audio},asplit={source_audio_chunks}{split_outputs}"
+    )
+
+
+def _append_inserted_audio_filter(
+    filters: list[str],
+    event: dict[str, Any],
+    input_index: int,
+    output_label: str,
+) -> None:
+    inserted_duration = float(event["inserted_duration"])
+    leading_silence = float(event["leading_silence"])
+    delay_filter = (
+        f"adelay={round(leading_silence * 1000)}:all=1,"
+        if leading_silence > 0
+        else ""
+    )
+    filters.append(
+        f"[{input_index}:a]atempo={NARRATION_ATEMPO:.3f},"
+        "asetpts=PTS-STARTPTS,"
+        f"{delay_filter}apad,atrim=duration={inserted_duration:.3f},"
+        "asetpts=PTS-STARTPTS,aresample=48000,"
+        "aformat=sample_fmts=fltp:channel_layouts=stereo"
+        f"[{output_label}]"
+    )
+
+
+def _record_insertion(
+    event: dict[str, Any],
+    output_anchor: float,
+    cumulative_offset: float,
+) -> dict[str, Any]:
+    source_item = event["source_item"]
+    kind = str(event["kind"])
+    insertion = {
+        "kind": kind,
+        "source_insertion_timestamp": round(
+            float(event["source_timestamp"]),
+            3,
+        ),
+        "output_insertion_timestamp": round(output_anchor, 3),
+        "leading_silence": float(event["leading_silence"]),
+        "spoken_duration": round(float(event["spoken_duration"]), 3),
+        "trailing_silence": float(event["trailing_silence"]),
+        "inserted_duration": round(float(event["inserted_duration"]), 3),
+        "cumulative_offset_after": round(cumulative_offset, 3),
+    }
+
+    if kind == "transition":
+        insertion.update(
+            {
+                "detected_anchor_timestamp": round(
+                    float(source_item["anchor_timestamp"]),
+                    3,
+                ),
+                "insertion_rule": source_item.get("insertion_rule"),
+                "transition_segment_description": source_item[
+                    "transition_segment_description"
+                ],
+                "location": source_item["location"],
+            }
+        )
+    else:
+        insertion.update(
+            {
+                "segment_id": source_item.get("segment_id"),
+                "segment_start": source_item.get("start"),
+                "segment_end": source_item.get("end"),
+                "segment_start_offset_seconds": (
+                    REGULAR_NARRATION_OFFSET_SECONDS
+                ),
+                "narration": source_item.get("narration", ""),
+            }
+        )
+
+    source_item["output_insertion_timestamp"] = insertion[
+        "output_insertion_timestamp"
+    ]
+    source_item["inserted_duration"] = insertion["inserted_duration"]
+    source_item["cumulative_offset_after"] = insertion[
+        "cumulative_offset_after"
+    ]
+    return insertion
+
+
 def _synthesize(
     paths: JobPaths,
     segments: list[dict[str, Any]],
     transition_data: dict[str, Any],
 ) -> dict[str, Any]:
-    """Mix regular narration and insert transition freezes in one encode."""
+    """Insert regular and transition narration as serialized video stalls."""
     video_path = paths.find_input_video()
     source_duration = _source_duration(paths)
     transitions = _valid_transitions(transition_data, source_duration)
+    events = _build_insertion_events(
+        segments,
+        transitions,
+        source_duration,
+    )
 
     command = [
         get_ffmpeg_binary(),
@@ -148,21 +283,23 @@ def _synthesize(
         "-i",
         str(paths.audio_wav),
     ]
-    for segment in segments:
-        command += ["-i", str(paths.job_dir / segment["narration_audio"])]
-    for transition in transitions:
-        command += ["-i", str(paths.job_dir / transition["tts_audio"])]
+    for input_index, event in enumerate(events, start=2):
+        event["input_index"] = input_index
+        command += ["-i", str(paths.job_dir / event["audio_path"])]
 
-    filters = _regular_audio_mix_filters(segments)
-    if not transitions:
-        filters.append("[0:v]setpts=PTS-STARTPTS[vout]")
+    if not events:
+        filters = [
+            "[0:v]setpts=PTS-STARTPTS[vout]",
+            "[1:a]asetpts=PTS-STARTPTS,aresample=48000,"
+            "aformat=sample_fmts=fltp:channel_layouts=stereo[aout]",
+        ]
         command += [
             "-filter_complex",
             ";".join(filters),
             "-map",
             "[vout]",
             "-map",
-            "[amixed]",
+            "[aout]",
             "-c:v",
             "libx264",
             "-preset",
@@ -179,21 +316,14 @@ def _synthesize(
         result = subprocess_run(command)
         if result.returncode != 0:
             raise RuntimeError(result.stderr)
-        return _write_empty_transition_timeline(paths, source_duration)
+        return _write_empty_timeline(paths, source_duration)
 
-    source_audio_chunks = _count_source_audio_chunks(
-        transitions,
-        source_duration,
-    )
+    source_audio_chunks = _count_source_audio_chunks(events, source_duration)
     if source_audio_chunks <= 0:
         raise RuntimeError("Single-pass synthesis produced no source audio chunks.")
-    if source_audio_chunks == 1:
-        filters.append("[amixed]anull[sourcea0]")
-    else:
-        split_outputs = "".join(
-            f"[sourcea{index}]" for index in range(source_audio_chunks)
-        )
-        filters.append(f"[amixed]asplit={source_audio_chunks}{split_outputs}")
+
+    filters: list[str] = []
+    _append_source_audio_filters(filters, source_audio_chunks)
 
     concat_labels: list[str] = []
     previous_anchor = 0.0
@@ -201,14 +331,10 @@ def _synthesize(
     insertions: list[dict[str, Any]] = []
     pair_count = 0
     source_audio_index = 0
-    transition_input_offset = 2 + len(segments)
 
-    for index, transition in enumerate(transitions):
-        anchor = float(transition["insertion_timestamp"])
-        spoken_duration = float(transition["tts_duration"]) / NARRATION_ATEMPO
-        freeze_duration = round(
-            spoken_duration + (TRANSITION_SILENCE_SECONDS * 2), 3
-        )
+    for event in events:
+        anchor = float(event["source_timestamp"])
+        inserted_duration = round(float(event["inserted_duration"]), 3)
 
         if anchor > previous_anchor + 0.001:
             video_label = f"v{pair_count}"
@@ -232,17 +358,15 @@ def _synthesize(
         filters.append(
             f"[0:v]trim=start={anchor:.3f}:end={frame_end:.3f},"
             "setpts=PTS-STARTPTS,tpad=stop_mode=clone:"
-            f"stop_duration={freeze_duration:.3f},"
-            f"trim=duration={freeze_duration:.3f},setpts=PTS-STARTPTS"
+            f"stop_duration={inserted_duration:.3f},"
+            f"trim=duration={inserted_duration:.3f},setpts=PTS-STARTPTS"
             f"[{freeze_video_label}]"
         )
-        transition_input_index = transition_input_offset + index
-        filters.append(
-            f"[{transition_input_index}:a]atempo={NARRATION_ATEMPO:.3f},"
-            f"adelay={round(TRANSITION_SILENCE_SECONDS * 1000)}:all=1,apad,"
-            f"atrim=duration={freeze_duration:.3f},asetpts=PTS-STARTPTS,"
-            "aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo"
-            f"[{freeze_audio_label}]"
+        _append_inserted_audio_filter(
+            filters,
+            event,
+            int(event["input_index"]),
+            freeze_audio_label,
         )
         concat_labels.extend(
             [f"[{freeze_video_label}]", f"[{freeze_audio_label}]"]
@@ -250,31 +374,14 @@ def _synthesize(
         pair_count += 1
 
         output_anchor = anchor + cumulative_offset
-        cumulative_offset += freeze_duration
-        insertion = {
-            "detected_anchor_timestamp": round(
-                float(transition["anchor_timestamp"]), 3
-            ),
-            "source_insertion_timestamp": round(anchor, 3),
-            "output_insertion_timestamp": round(output_anchor, 3),
-            "leading_silence": TRANSITION_SILENCE_SECONDS,
-            "spoken_duration": round(spoken_duration, 3),
-            "trailing_silence": TRANSITION_SILENCE_SECONDS,
-            "inserted_duration": freeze_duration,
-            "cumulative_offset_after": round(cumulative_offset, 3),
-            "transition_segment_description": transition[
-                "transition_segment_description"
-            ],
-            "location": transition["location"],
-        }
-        insertions.append(insertion)
-        transition["output_insertion_timestamp"] = insertion[
-            "output_insertion_timestamp"
-        ]
-        transition["inserted_duration"] = freeze_duration
-        transition["cumulative_offset_after"] = insertion[
-            "cumulative_offset_after"
-        ]
+        cumulative_offset += inserted_duration
+        insertions.append(
+            _record_insertion(
+                event,
+                output_anchor,
+                cumulative_offset,
+            )
+        )
         previous_anchor = anchor
 
     if previous_anchor < source_duration - 0.001:
@@ -341,11 +448,19 @@ def run_synthesis(job_id: str) -> dict[str, Any]:
         narrated_segments,
         transitions,
     )
+    atomic_write_json(paths.enriched_segments_json, enriched)
 
     return {
-        "narrated_segment_count": len(narrated_segments),
-        "transition_insertion_count": len(timeline["insertions"]),
+        "narrated_segment_count": sum(
+            1
+            for insertion in timeline["insertions"]
+            if insertion["kind"] == "regular"
+        ),
+        "transition_insertion_count": sum(
+            1
+            for insertion in timeline["insertions"]
+            if insertion["kind"] == "transition"
+        ),
         "total_inserted_duration": timeline["total_inserted_duration"],
         "output_duration": timeline["output_duration"],
     }
-

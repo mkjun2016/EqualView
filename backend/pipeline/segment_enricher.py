@@ -46,6 +46,9 @@ def _build_enriched_segment(
         "duration": duration,
         "audio_type": audio_type,
         "text": text,
+        "narration_safe": bool(
+            raw_segment.get("narration_safe", narration_candidate)
+        ),
         "narration_candidate": narration_candidate,
         "context": {
             "previous_speech": None,

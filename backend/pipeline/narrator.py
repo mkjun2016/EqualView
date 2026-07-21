@@ -24,14 +24,11 @@ from config import (
     NARRATION_FRAME_MAX_PX,
     NARRATION_FRAMES_PER_SEGMENT,
     NARRATION_JPEG_QUALITY,
-    NARRATION_KOREAN_CHARS_PER_SECOND,
     NARRATION_MAX_CONCURRENCY,
     NARRATION_MAX_RETRIES,
     NARRATION_REQUEST_STAGGER_SECONDS,
     NARRATION_RETRY_BASE_SECONDS,
     NARRATION_RETRY_MAX_SECONDS,
-    NARRATION_SAFETY_MARGIN_SECONDS,
-    NARRATION_SHORTEN_MAX_ATTEMPTS,
 )
 
 _RETRYABLE_GEMINI_MARKERS = (
@@ -238,14 +235,10 @@ def _generate_narration(
 
 
 def _build_prompt(
-    start: float,
-    end: float,
     person_ids: list[str],
     prior_dialogue: str,
     upcoming_dialogue: str,
 ) -> str:
-    duration = round(end - start, 2)
-    max_chars = _max_narration_chars(duration)
     people_line = (
         f"Visible tracked people in the frames: {', '.join(person_ids)}."
         if person_ids
@@ -266,46 +259,78 @@ def _build_prompt(
         "You are writing Korean audio description for visually impaired film "
         "viewers. The supplied images are chronological video frames grouped "
         "as previous_context, target_silent_segment, and next_context. A group "
-        "may contain fewer than three frames or no frames; this is normal. Use "
-        "previous_context and next_context to understand continuity. Base "
-        "the audio description on target_silent_segment, do not treat events "
-        "shown only in the context groups as if they occurred in the target "
-        f"silent interval lasting {duration} seconds, and never invent missing "
-        "visual information.\n\n"
+        "may contain fewer than three frames or no frames; this is normal. Treat all "
+        "available frames as samples from one continuous video sequence.\n\n"
+        "Use previous_context and next_context only to understand the immediate "
+        "continuity surrounding target_silent_segment. Determine actions primarily "
+        "from the target frames. You may describe a simple continuous action only "
+        "when multiple target frames clearly show its progression. A difference "
+        "between sampled frames may be caused by a cut, camera movement, or "
+        "occlusion; do not automatically turn that difference into an action. When "
+        "the action is uncertain, describe the visible state in the target frames "
+        "instead.\n\n"
+        "Make only minimal, high-confidence inferences directly supported by the "
+        "visible sequence. Choose the simplest explanation that accounts for the "
+        "observed change. If an interpretation is not clearly and confidently "
+        "supported by the visible sequence, do not infer or mention it. Describe "
+        "only what is directly visible, such as a person's posture, clearly "
+        "observable movement, or a stable visible change between target frames. "
+        "Do not infer a specific "
+        "event, place, relationship, motive, emotion, or unseen action from weak "
+        "or decorative clues. For example, the "
+        "presence of flowers does not justify describing the location as a "
+        "wedding venue.\n\n"
+        "Use spatial and cinematic composition as supporting evidence, not as proof "
+        "of a person's exact physical position or movement. Mention direction, "
+        "orientation, or a precise location such as an entrance, the end of a "
+        "passage, or behind another person only when stable landmarks and multiple "
+        "target frames clearly support it. A foreground view of someone's back or "
+        "a change in camera angle does not mean that the person turned around. When "
+        "the spatial relationship is unclear, use a coarse description or omit it.\n\n"
+        "Describe the visible details of the scene, especially the background, "
+        "surrounding environment, spatial layout, prominent objects, lighting, "
+        "weather, colors, and overall visual atmosphere. Provide enough concrete "
+        "detail to help the viewer understand and picture the setting, but do not "
+        "invent unseen details or unsupported meanings.\n\n"
+        "Do not narrate an event shown only in previous_context or next_context "
+        "as though it occurred during target_silent_segment. Use those frames to "
+        "understand continuity without moving an event into the wrong interval. "
+        "Exactly one target segment is supplied in this request. Before writing "
+        "its regular audio description, inspect the transition descriptions in "
+        "the target segment's events and in its before_segment and after_segment "
+        "transition context. Do not repeat or paraphrase visual information already "
+        "covered by any of those transition descriptions. If no distinct supported "
+        "detail remains, write a shorter description or return an empty narration. "
+        "Never invent information merely to avoid overlap. "
+        "The final narration must describe exactly one segment. \n\n"
+        "When earlier segment requests and Korean audio descriptions are available "
+        "in this chat, use them as continuity memory. For the first segment, where "
+        "no earlier narration exists, rely only on the supplied frame groups, "
+        "timeline, and dialogue context. "
+        "Use earlier descriptions to keep references to people, clothing, locations, "
+        "and objects consistent. Continue an earlier action only when the current "
+        "target frames independently confirm that it is still happening. Avoid "
+        "repeating details already described unless they are necessary to understand "
+        "the current segment, but prefer an accurate brief repetition over an "
+        "unsupported new action or position. Treat earlier narrations "
+        "only as past context, never as proof that the same event occurs in the "
+        "current target segment. The current frames are always the primary evidence; "
+        "if earlier narration conflicts with them, follow the current frames.\n\n"
         f"{people_line}\n\n"
         f"{prior_line}\n\n"
         f"{upcoming_line}\n\n"
-        "Write concise and natural Korean audio description that can be spoken "
-        f"comfortably within {duration} seconds. Use no more "
-        f"than {max_chars} Korean characters, excluding spaces. Focus on the "
-        "visible action, the people involved, and the setting or a meaningful "
-        "visual change. "
-        #  "Remove decorative detail before removing essential information. " #
-        "Describe only "
-        "visually observable actions, expressions, people, objects, setting, "
-        "and meaningful atmosphere changes. Prefer wording grounded in what "
-        "the target frames confirm. If the surrounding context suggests a "
-        "likely next action, avoid presenting it as completed unless it is "
-        "visible in the target frames. When the outcome is unclear, describe "
-        "the visible state or ongoing movement. Connect naturally with the nearby "
-        "dialogue without repeating it. Never output tracking identifiers such "
-        "as person_001; refer to people naturally by visible traits such as a "
-        "man, a woman, or a person in specific clothing. Do not infer names, "
-        "relationships, motives, or facts that are not visible. Output only the "
-        "Korean narration text with no labels or explanation."
+        "Write a natural Korean audio description focused on the most reliable "
+        "visible information: clearly shown actions, people, expressions, "
+        "background, environment, and visual atmosphere. If no action is clearly "
+        "shown, a brief description of the visible posture, people, or setting is "
+        "sufficient. Avoid dramatic motion adverbs unless the speed or force is "
+        "unmistakably visible across the target frames. "
+        "Connect naturally with nearby dialogue without repeating it. Never "
+        "output tracking identifiers such as person_001; refer to people naturally "
+        "by visible traits such as a man, a woman, or a person in specific clothing. "
+        "Do not infer names, relationships, motives, or facts that are not visible. "
+        "Output only the Korean narration text with no labels or explanation."
     )
-
-
-def _max_narration_chars(duration: float) -> int:
-    usable_duration = max(0.5, duration - NARRATION_SAFETY_MARGIN_SECONDS)
-    return max(
-        6,
-        int(usable_duration * NARRATION_KOREAN_CHARS_PER_SECOND * 1.1),
-    )
-
-
-def _narration_character_count(text: str) -> int:
-    return len("".join(text.split()))
 
 
 def _prepare_narration_jobs(
@@ -416,8 +441,6 @@ def _prepare_narration_jobs(
             segment["end"],
         )
         prompt = _build_prompt(
-            segment["start"],
-            segment["end"],
             person_ids,
             prior_dialogue,
             upcoming_dialogue,
@@ -492,25 +515,6 @@ def _send_chat_narration(chat: Any, job: NarrationJob) -> str:
         try:
             response = chat.send_message(message)
             narration = (response.text or "").strip()
-            max_chars = _max_narration_chars(
-                float(job.segment.get("duration") or 0.0)
-            )
-
-            for _ in range(NARRATION_SHORTEN_MAX_ATTEMPTS):
-                if _narration_character_count(narration) <= max_chars:
-                    break
-                response = chat.send_message(
-                    "Shorten your previous Korean narration to no more than "
-                    f"{max_chars} Korean characters excluding spaces. Preserve "
-                    "the main visible action, the people involved, and the "
-                    "setting or meaningful visual change as equally important "
-                    "screen information. Remove only decorative or redundant "
-                    "detail without adding an outcome that the target frames "
-                    "do not confirm. Output the revised Korean narration text with no "
-                    "labels or explanation."
-                )
-                narration = (response.text or "").strip()
-
             return narration
         except Exception as exc:
             last_error = exc
@@ -538,17 +542,26 @@ def _run_chat_chunk(
     chat = client.chats.create(model=GEMINI_MODEL)
     context_message = (
         "You will create Korean film audio descriptions for one chronological "
-        "section of this video. The shared context below contains two separate "
-        "timelines: enriched_timeline for dialogue, timing, and tracked people, "
-        "and transition_timeline for detected scene changes and their reserved "
-        "transition descriptions. Read both timelines once and retain their "
-        "chronological and visual context throughout this chat. Regular audio "
-        "descriptions must complement, rather than repeat, information already "
-        "covered by a nearby transition description. Focus regular narration "
-        "on visible actions, people, expressions, and other essential details "
-        "that the transition description does not cover. Use later timeline "
-        "events as context, while avoiding wording that makes them sound as if "
-        "they already occurred in an earlier target interval. "
+        "section of this video. The shared context below contains one unified "
+        "timeline. Each timeline segment contains dialogue, timing, tracked people, "
+        "and any detected scene-change events with their reserved transition "
+        "descriptions. An empty before_segment or after_segment array means that "
+        "the corresponding adjacent segment has no transition description. Read "
+        "the timeline once and retain its "
+        "chronological and visual context throughout this chat. Each request contains "
+        "exactly one target segment. Before writing its regular audio description, "
+        "inspect all transition descriptions attached to the previous segment, the "
+        "target segment, and the next segment. Do not repeat or paraphrase visual "
+        "information already covered by any of those transition descriptions. "
+        "If no distinct supported detail remains, write a shorter description or return "
+        "an empty narration. Accuracy takes priority "
+        "over novelty: never invent a new action, pose, direction, or position merely "
+        "to make the regular narration different. When no distinct new action is "
+        "clearly visible, use a stable target-frame detail or a brief static "
+        "description, even if it overlaps slightly with earlier context. Previous "
+        "and later timeline events are context "
+        "only; never move their actions, outcomes, settings, or visual details into "
+        "the current target interval. "
         "Do not generate narration yet. Reply only with CONTEXT_READY.\n\n"
         f"{timeline_context}"
     )
@@ -570,41 +583,135 @@ def _run_chat_chunk(
     return narrated_count, failed_count
 
 
+def _build_unified_timeline(
+    segments: list[dict[str, Any]],
+    scenes: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    timeline = [
+        {
+            "segment_id": segment.get("segment_id"),
+            "start": segment.get("start"),
+            "end": segment.get("end"),
+            "duration": segment.get("duration"),
+            "audio_type": segment.get("audio_type"),
+            "dialogue": segment.get("text", ""),
+            "narration_safe": bool(segment.get("narration_safe")),
+            "context": segment.get("context", {}),
+            "visible_person_ids": segment.get("persons", {}).get(
+                "visible_person_ids", []
+            ),
+            "events": [],
+        }
+        for segment in sorted(
+            segments,
+            key=lambda item: float(item.get("start") or 0.0),
+        )
+    ]
+    if not timeline:
+        return timeline
+
+    starts = [float(segment.get("start") or 0.0) for segment in timeline]
+    for scene in sorted(
+        scenes,
+        key=lambda item: float(item.get("anchor_timestamp") or 0.0),
+    ):
+        anchor = float(scene.get("anchor_timestamp") or 0.0)
+        segment_index = bisect.bisect_right(starts, anchor) - 1
+
+        if segment_index < 0:
+            segment_index = 0
+        elif anchor >= float(timeline[segment_index].get("end") or 0.0):
+            next_index = segment_index + 1
+            if next_index < len(timeline):
+                segment_index = next_index
+
+        timeline[segment_index]["events"].append(
+            {
+                "type": "scene_transition",
+                "timestamp": anchor,
+                "location": scene.get("location", ""),
+                "description_hint": scene.get(
+                    "transition_segment_description", ""
+                ),
+            }
+        )
+
+    for segment_index, segment in enumerate(timeline):
+        if not segment["narration_safe"]:
+            continue
+
+        before_events = (
+            timeline[segment_index - 1]["events"]
+            if segment_index > 0
+            else []
+        )
+        after_events = (
+            timeline[segment_index + 1]["events"]
+            if segment_index + 1 < len(timeline)
+            else []
+        )
+        segment["transition_context"] = {
+            "before_segment": [
+                event["description_hint"]
+                for event in before_events
+                if event.get("description_hint")
+            ],
+            "after_segment": [
+                event["description_hint"]
+                for event in after_events
+                if event.get("description_hint")
+            ],
+        }
+
+    return timeline
+
+
+def _merge_timeline_into_enriched_segments(
+    segments: list[dict[str, Any]],
+    timeline: list[dict[str, Any]],
+) -> None:
+    timeline_by_segment_id = {
+        item.get("segment_id"): item
+        for item in timeline
+        if item.get("segment_id")
+    }
+
+    for segment in segments:
+        timeline_segment = timeline_by_segment_id.get(segment.get("segment_id"))
+        if timeline_segment is None:
+            segment["events"] = []
+            segment.pop("transition_context", None)
+            continue
+
+        segment["events"] = timeline_segment.get("events", [])
+        if "transition_context" in timeline_segment:
+            segment["transition_context"] = timeline_segment[
+                "transition_context"
+            ]
+        else:
+            segment.pop("transition_context", None)
+
+
 def _execute_narration_jobs(
     jobs: list[NarrationJob],
     segments_data: dict[str, Any],
     transition_data: dict[str, Any],
 ) -> tuple[int, int]:
+    timeline = _build_unified_timeline(
+        segments_data.get("segments", []),
+        transition_data.get("scenes", []),
+    )
+    _merge_timeline_into_enriched_segments(
+        segments_data.get("segments", []),
+        timeline,
+    )
+
     if not jobs:
         return 0, 0
 
     chunks = _split_contiguous_chunks(jobs, NARRATION_MAX_CONCURRENCY)
     request_context = {
-        "enriched_timeline": [
-            {
-                "segment_id": segment.get("segment_id"),
-                "start": segment.get("start"),
-                "end": segment.get("end"),
-                "duration": segment.get("duration"),
-                "audio_type": segment.get("audio_type"),
-                "dialogue": segment.get("text", ""),
-                "context": segment.get("context", {}),
-                "visible_person_ids": segment.get("persons", {}).get(
-                    "visible_person_ids", []
-                ),
-            }
-            for segment in segments_data.get("segments", [])
-        ],
-        "transition_timeline": [
-            {
-                "anchor_timestamp": scene.get("anchor_timestamp"),
-                "location": scene.get("location", ""),
-                "transition_segment_description": scene.get(
-                    "transition_segment_description", ""
-                ),
-            }
-            for scene in transition_data.get("scenes", [])
-        ],
+        "timeline": timeline
     }
     timeline_context = json.dumps(
         request_context,

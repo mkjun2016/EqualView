@@ -122,10 +122,9 @@ def run_tts(job_id: str) -> dict[str, Any]:
         segment.pop("narration_start_timestamp", None)
         segment.pop("collision_action", None)
 
-    # Resolve each transition from the enriched segment containing its original
-    # anchor. Speech always has priority. In a non-speech segment, preserve the
-    # visual transition anchor and delay regular narration until that anchor so
-    # the transition description is inserted before regular narration.
+    # Regular and transition narration are serialized as separate stalls during
+    # synthesis. Only move a transition when its visual anchor interrupts
+    # source speech; regular narration no longer needs timing collision offsets.
     for transition in transitions_data.get("scenes", []):
         anchor = float(transition["anchor_timestamp"])
 
@@ -154,21 +153,8 @@ def run_tts(job_id: str) -> dict[str, Any]:
             if audio_type == "speech":
                 insertion_timestamp = float(containing_segment["end"])
                 insertion_rule = "after_speech_segment"
-            elif containing_segment.get("narration_audio"):
-                insertion_timestamp = anchor
-                existing_narration_start = float(
-                    containing_segment.get(
-                        "narration_start_timestamp",
-                        containing_segment["start"],
-                    )
-                )
-                containing_segment["narration_start_timestamp"] = round(
-                    max(existing_narration_start, anchor),
-                    3,
-                )
-                insertion_rule = "original_anchor_before_regular_narration"
             else:
-                insertion_rule = "original_anchor_without_regular_narration"
+                insertion_rule = "original_anchor_in_non_speech"
 
         transition["insertion_timestamp"] = round(insertion_timestamp, 3)
         transition["insertion_rule"] = insertion_rule

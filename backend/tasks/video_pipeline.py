@@ -33,7 +33,7 @@ def process_video_job(job_id: str) -> None:
             job_id,
             status="FAILED",
             error=str(exc),
-            current_step="?ㅽ뙣",
+            current_step="영상 분석 실패",
         )
         raise
 
@@ -49,7 +49,7 @@ def process_face_job(job_id: str) -> None:
             job_id,
             face_status="PROCESSING",
             face_progress=10,
-            face_current_step="?쇨뎬 遺꾩꽍 ?쒖옉",
+            face_current_step="얼굴 분석 시작",
             face_error=None,
         )
 
@@ -60,7 +60,7 @@ def process_face_job(job_id: str) -> None:
             job_id,
             face_status="COMPLETED",
             face_progress=100,
-            face_current_step="?쇨뎬 遺꾩꽍 ?꾨즺",
+            face_current_step="얼굴 분석 완료",
             face_error=None,
             face_result=result,
             face_seconds=round(time.monotonic() - started_at, 2),
@@ -73,7 +73,7 @@ def process_face_job(job_id: str) -> None:
             job_id,
             face_status="FAILED",
             face_error=str(exc),
-            face_current_step="?쇨뎬 遺꾩꽍 ?ㅽ뙣",
+            face_current_step="얼굴 분석 실패",
         )
         raise
 
@@ -147,7 +147,7 @@ def _run_narration_if_ready(job_id: str) -> None:
             job_id,
             narration_status="FAILED",
             narration_error=str(exc),
-            current_step="?붾㈃?댁꽕 ?앹꽦 ?ㅽ뙣",
+            current_step="화면해설 생성 실패",
         )
         return
 
@@ -195,7 +195,7 @@ def _run_combine_if_ready(job_id: str) -> None:
             job_id,
             combine_status="FAILED",
             combine_error=str(exc),
-            current_step="理쒖쥌 ?곸긽 ?⑹꽦 ?ㅽ뙣",
+            current_step="최종 영상 합성 실패",
         )
         return
 
@@ -204,5 +204,5 @@ def _run_combine_if_ready(job_id: str) -> None:
         combine_status="COMPLETED",
         combine_result={**tts_result, **synthesis_result},
         combine_seconds=round(time.monotonic() - combine_started_at, 2),
-        current_step="泥섎━ ?꾨즺",
+        current_step="처리 완료",
     )
