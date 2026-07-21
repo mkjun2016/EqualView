@@ -18,7 +18,7 @@ def get_whisper_model() -> Any:
         from faster_whisper import WhisperModel
 
         _model = WhisperModel(
-            "base",
+            "small",
             device="cpu",
             compute_type="int8",
         )
