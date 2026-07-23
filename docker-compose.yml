@@ -22,7 +22,7 @@ services:
       UPLOAD_DIR: /app/uploads
       HF_HOME: /root/.cache/huggingface
     volumes:
-      - uploads_data:/app/uploads
+      - ./backend/uploads:/app/uploads
       - whisper_cache:/root/.cache/huggingface
     depends_on:
       redis:
@@ -39,12 +39,11 @@ services:
       UPLOAD_DIR: /app/uploads
       HF_HOME: /root/.cache/huggingface
     volumes:
-      - uploads_data:/app/uploads
+      - ./backend/uploads:/app/uploads
       - whisper_cache:/root/.cache/huggingface
     depends_on:
       redis:
         condition: service_healthy
 
 volumes:
-  uploads_data:
   whisper_cache:
