@@ -1,6 +1,6 @@
 # face_tracker.py가 만든 person_001, 색상, 얼굴 좌표를 받음
 # 원본 프레임에 색 테두리와 person_001 라벨을 그림
-# 결과를 annotated_frames/frame_012000.jpg 같은 파일로 저장
+# 결과를 annotated_frames/frame_012000.jpg 같은 파일로 저장 #
 
 
 from __future__ import annotations
